@@ -37,7 +37,7 @@ python inference_main.py \
 
 ```json
 {
-  "log_level": "DEBUG",
+  "log_level": "INFO",
   "use_encrypted_tasks": false,
   "controller": {
     "type": "llm",
@@ -59,7 +59,7 @@ python inference_main.py \
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `log_level` | string | Logging verbosity: DEBUG, INFO, WARNING, ERROR |
+| `log_level` | string | Logging verbosity: DEBUG, INFO, WARNING, ERROR (default: INFO)|
 | `use_encrypted_tasks` | bool | Enable encrypted task files (default: false) |
 | `controller.type` | string | Agent type: "llm" (AI model) or "human" (interactive) |
 | `controller.args.model` | string | Model identifier (e.g., "gpt-5.1", "Qwen3-VL") |
@@ -133,7 +133,7 @@ result = {
         }
     ],
     "sandbox": {
-        "docker_port": 8084,
+        "docker_port": 8080,
         "client_type": "unified"
     }
 }
@@ -156,27 +156,23 @@ if sandbox_sdk_path.exists():
 docker_port = result.get("sandbox", {}).get("docker_port", 8080)
 sandbox = Sandbox(base_url=f"http://localhost:{docker_port}")
 
-# Read file
+# Read file (text files, e.g., .txt, .md, .tex, etc.)
 content = sandbox.file.read_file(file="/home/gem/output.txt").data.content
 
 # List directory
 entries = sandbox.file.list_path(path="/home/gem").data.entries
 
-# Download file
+# Download file (binary files, e.g., .jpg, .png, .doc, .pptx, etc.)
 binary_data = sandbox.file.download_file(path="/home/gem/report.pdf")
-
-# Take screenshot
-image = sandbox.browser.screenshot().data.image
 ```
 
 **Common File APIs:**
 
 | Capability      | API                              | Returns                         |
 |-----------------|----------------------------------|---------------------------------|
-| Read file       | `sandbox.file.read_file(file=path)` | `.data.content` with full text |
+| Read file       | `sandbox.file.read_file(file=path)` | `.data.content` with full text (for text files, e.g., .txt, .md, .tex, etc.) |
 | List directory  | `sandbox.file.list_path(path=dir)`  | `.data.entries` list            |
-| Download file   | `sandbox.file.download_file(path=path)` | Binary data for streaming   |
-| Screenshot      | `sandbox.browser.screenshot()`     | `.data.image` as base64         |
+| Download file   | `sandbox.file.download_file(path=path)` | Binary data for streaming (for binary files, e.g., .jpg, .png, .doc, .pptx, etc.) |
 
 ## Results
 
