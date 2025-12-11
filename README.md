@@ -1,4 +1,7 @@
-# Cocoa-Agent
+<h1 align="center">
+  <img src="assets/logo-icon.svg" alt="CocoaBench" width="40" height="40" align="absmiddle">
+  Cocoa-Agent
+</h1>
 
 Cocoa-Agent is an agent framework for building and evaluating general digital agents. It provides seamless integration with [AIO Sandbox](https://github.com/agent-infra/sandbox), an all-in-one Docker environment. It equips agents with a full suite of tools—browser automation, terminal access, file operations, and code interpreters—enabling them to operate like human developers in realistic settings. Our framework is model-agnostic, and we provide example scripts for running agents with both open-source LLMs such as [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) and commercial models such as [GPT-5.1](https://openai.com/index/gpt-5-1/), on the example task of [CocoaBench](https://cocoabench.github.io/). To support robust evaluation at scale, cocoa-agent implements both dynamic runtime tests for verifying computational correctness and lightweight static-matching checks for deterministic answers.
 
