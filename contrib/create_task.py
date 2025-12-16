@@ -8,7 +8,7 @@ Usage:
 
 The wizard will guide you through creating all required files for a new task.
 Inspired by Terminal-Bench's task creation workflow.
-Reference: https://www.tbench.ai/docs/task-quickstart
+Reference: https://cocoabench.github.io/
 """
 
 import json
@@ -269,7 +269,7 @@ def run_wizard():
 {Colors.RED}✗{Colors.END} Trivial single-step tasks
 {Colors.RED}✗{Colors.END} Tasks requiring real-time API access that may change
 
-Reference: https://www.tbench.ai/docs/task-quickstart
+Reference: https://cocoabench.github.io/#examples
 """)
     
     if not get_yes_no("Ready to start?"):

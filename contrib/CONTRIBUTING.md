@@ -6,7 +6,7 @@ We'd love to have your help in building a diverse and challenging benchmark. The
 
 This guide will walk you through the process of creating and submitting a new task. Don't worry if it's your first time — we've tried to make it as straightforward as possible.
 
-> 💡 **Quick tip:** Please encrypt your task files before submitting. This keeps our benchmark data safe from being included in LLM training sets, which helps ensure fair evaluation for everyone.
+> 💡 **Quick tip:** Please encrypt your task files before submitting. This keeps our benchmark data safe from being found by LLM agents that can search online, which helps ensure fair evaluation for everyone.
 
 ---
 
@@ -41,12 +41,12 @@ Great tasks tend to share these qualities:
 - 🌐 Involve **web browsing, visual perception, or file processing**
 - 🔧 Combine **multiple tools** (e.g., search + calculation + code)
 
-Feel free to browse `cocoabench-example-tasks/` for inspiration!
+Feel free to browse our [example tasks](https://cocoabench.github.io/#examples) for inspiration!
 
 ### Things to Keep in Mind
 
 - ❌ Too easy (directly solvable by ChatGPT with searching)
-- ❌ Time-sensitive data that will become stale
+- ❌ Time-sensitive data that will become stale (e.g., the solution relies on a website that will likely update)
 - ❌ Subjective or opinion-based answers
 - ❌ Impossible to evaluate automatically
 - ❌ Require excessive resources or paid APIs
