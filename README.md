@@ -77,7 +77,7 @@ ls cocoa-bench-v0.1/
 | `docker-compose.yaml` | Docker config |
 | `assets/` | Additional files for the task (optional) |
 
-**Evaluation:** Each `test.py` exports a `test(result)` function. If you're using your own agent, you typically just need to pass `{"task_result": "<agent's final answer>"}`. See [Evaluation](#evaluation) for details.
+**Evaluation:** Each `test.py` exports a `test(result)` function. If you're using your own agent, you typically just need to pass `{"task_result": "<agent's final answer>"}`. See [Evaluation](#-evaluation) for details.
 
 ### Option B: Run with CocoaAgent Framework
 
