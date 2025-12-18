@@ -9,23 +9,23 @@
 
 <p align="center">
   <a href="https://cocoabench.github.io/">
-    <img src="https://img.shields.io/badge/🌐_Website-3E2723?style=flat" alt="Website">
+    <img src="https://img.shields.io/badge/Website-3E2723?style=flat&logo=safari&logoColor=white" alt="Website">
   </a>
   &nbsp;
   <a href="https://cocoabench.github.io/blog.html">
-    <img src="https://img.shields.io/badge/📝_Blog-2ECC71?style=flat" alt="Blog">
+    <img src="https://img.shields.io/badge/Blog-5D4037?style=flat&logo=hashnode&logoColor=white" alt="Blog">
   </a>
   &nbsp;
   <a href="https://cocoabench.github.io/leaderboard.html">
-    <img src="https://img.shields.io/badge/🏆_Leaderboard-F39C12?style=flat" alt="Leaderboard">
+    <img src="https://img.shields.io/badge/Leaderboard-795548?style=flat&logo=target&logoColor=white" alt="Leaderboard">
   </a>
   &nbsp;
   <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/🐍_Python_3.13+-3776AB?style=flat" alt="Python">
+    <img src="https://img.shields.io/badge/Python_3.13+-8D6E63?style=flat&logo=python&logoColor=white" alt="Python">
   </a>
   &nbsp;
   <a href="LICENSE">
-    <img src="https://img.shields.io/badge/📄_MIT_License-9E9E9E?style=flat" alt="License">
+    <img src="https://img.shields.io/badge/MIT_License-A1887F?style=flat&logo=opensourceinitiative&logoColor=white" alt="License">
   </a>
 </p>
 
