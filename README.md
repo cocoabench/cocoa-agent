@@ -3,97 +3,170 @@
   CocoaAgent
 </h1>
 
-CocoaAgent is an agent framework for building and evaluating general digital agents. It provides seamless integration with [AIO Sandbox](https://github.com/agent-infra/sandbox), an all-in-one Docker environment. It equips agents with a full suite of tools—browser automation, terminal access, file operations, and code interpreters—enabling them to operate like human developers in realistic settings. Our framework is model-agnostic, and we provide example scripts for running agents with both open-source LLMs such as [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) and commercial models such as [GPT-5.1](https://openai.com/index/gpt-5-1/), on the example task of [CocoaBench](https://cocoabench.github.io/). To support robust evaluation at scale, CocoaAgent implements both dynamic runtime tests for verifying computational correctness and lightweight static-matching checks for deterministic answers.
+<p align="center">
+  An Evaluation Framework for General Agents with Compositional Cognitive Abilities
+</p>
 
-> **Note**:
-> To evaluate CocoaBench with an existing agent system, you may [download](https://cocoabench.github.io/) the dataset directly and decrypt the tasks using this codebase, without using the CocoaAgent framework. The CocoaAgent framework is intended for developers who want to evaluate LLMs or build their own agent systems.
+<p align="center">
+  <a href="https://cocoabench.github.io/">
+    <img src="https://img.shields.io/badge/🌐_Website-3E2723?style=flat" alt="Website">
+  </a>
+  &nbsp;
+  <a href="https://cocoabench.github.io/blog.html">
+    <img src="https://img.shields.io/badge/📝_Blog-2ECC71?style=flat" alt="Blog">
+  </a>
+  &nbsp;
+  <a href="https://cocoabench.github.io/leaderboard.html">
+    <img src="https://img.shields.io/badge/🏆_Leaderboard-F39C12?style=flat" alt="Leaderboard">
+  </a>
+  &nbsp;
+  <a href="https://www.python.org/">
+    <img src="https://img.shields.io/badge/🐍_Python_3.13+-3776AB?style=flat" alt="Python">
+  </a>
+  &nbsp;
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/📄_MIT_License-9E9E9E?style=flat" alt="License">
+  </a>
+</p>
 
-## Overview
+<br>
 
-This framework provides:
+## 📦 What's Inside
 
-- **Model-agnostic execution** - Works with any OpenAI-compatible LLM or human controllers
-- **Comprehensive tool suite** - Browser automation, terminal, file operations, code interpretation
-- **Scalable evaluation** - Dynamic runtime tests and lightweight static-matching checks
-- **Execution tracking** - Full conversation history and action traces for analysis
-- **Docker isolation** - Sandboxed task environments with custom configurations
+- **CocoaBench Dataset** — Benchmark tasks designed around cognitive abilities (perception, reasoning, memory) rather than specific tools
+- **CocoaAgent Framework** — Model-agnostic agent executor that equips agents with general tools (browser, terminal, file operations, code interpreter) via [AIO Sandbox](https://github.com/agent-infra/sandbox)
 
-## Quick Start
+## 🛠️ Prerequisites
 
-### Running Tasks
+- Python 3.13+
+- Docker & Docker Compose
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
-Execute all tasks in a directory using the main entry point:
+## ☕ Why CocoaBench?
+
+Current agent benchmarks often reward domain-specific workflows rather than general cognitive abilities. CocoaBench focuses on:
+
+- **Perception**: How agents extract and preprocess information from diverse sources (websites, files, images)
+- **Reasoning**: Multi-step planning with deductive, inductive, and abductive inference
+- **Memory**: Managing working memory and procedural skills across long trajectories
+- **Composition**: How agents combine these abilities to solve complex, open-ended tasks
+
+Tasks are human-understandable and automatically evaluated, but designed to challenge agents that can adapt across domains rather than overfit to specific environments.
+
+## 🚀 Quick Start
+
+### Option A: Use the Dataset Only (with your own agent)
 
 ```bash
-python inference_main.py \
-  --config configs/default_gpt.json \
-  --tasks-dir tasks/ \
-  --output-dir results/
+# 1. Download and decrypt
+curl -LO https://cocoabench.github.io/assets/data/cocoa-bench-v0.1.zip
+unzip cocoa-bench-v0.1.zip && rm cocoa-bench-v0.1.zip
+python decrypt.py
+
+# 2. Browse tasks
+ls cocoa-bench-v0.1/
 ```
 
-**Command-line Options:**
-- `--config CONFIG_FILE`: Path to configuration file (default: `config.json`)
-- `--tasks-dir TASKS_DIR`: Directory containing task subdirectories (default: `tasks/`)
-- `--output-dir OUTPUT_DIR`: Output directory for results JSON files (default: `results/`)
-- `--model MODEL_NAME`: Override model name from config
+**Each task directory contains:**
 
-### Configuration File Format
+| File | Purpose |
+|------|---------|
+| `task.yaml` | Task instructions to give your agent |
+| `test.py` | Evaluation script with `test(result)` function |
+| `Dockerfile` | Task environment (optional, for sandbox setup) |
+| `docker-compose.yaml` | Docker config (optional) |
 
-**Example `configs/default_gpt.json`:**
+**To evaluate your agent's output:**
+
+```python
+import sys
+sys.path.insert(0, "cocoa-bench-v0.1/eight-puzzle-game")
+from test import test
+
+# Construct a result dict with your agent's output
+result = {
+    "status": "success",
+    "task_result": "...",  # Agent's final answer
+    "conversation": [...],  # Full conversation history (optional)
+}
+
+print(test(result))
+# → {"passed": True/False, "feedback": "..."}
+```
+
+> [!NOTE]
+> Each task has its own answer format (string, number, JSON, etc.). Check `task.yaml` for the expected output format and `test.py` for evaluation logic.
+
+### Option B: Run with CocoaAgent Framework
+
+```bash
+# 1. Install
+git clone https://github.com/cocoabench/cocoa-agent.git && cd cocoa-agent
+uv sync  # or: pip install -r requirements.txt
+
+# 2. Choose tasks
+# See included example tasks: cocoabench-example-tasks/
+# Or download full benchmark dataset: follow Option A above
+
+# 3. Configure
+cp configs/default_gpt.json configs/my-config.json
+# Edit my-config.json: set your API key
+
+# 4. Run with example tasks
+python inference_main.py \
+  --config configs/my-config.json \
+  --tasks-dir cocoabench-example-tasks/ \
+  --output-dir results/
+
+# Or run with full dataset (after downloading):
+# python inference_main.py \
+#   --config configs/my-config.json \
+#   --tasks-dir cocoa-bench-v0.1/ \
+#   --output-dir results/
+```
+
+## ⚙️ Configuration
+
+> [!IMPORTANT]
+> Please encrypt your task before submitting a PR to keep benchmark data safe.
+
 
 ```json
 {
-  "log_level": "INFO",
-  "use_encrypted_tasks": false,
   "controller": {
     "type": "llm",
     "args": {
-      "model": "gpt-5.1",
-      "base_url": "",
-      "api_key": "sk-proj-..."
+      "model": "gpt-5.2",
+      "api_key": "sk-...",
+      "base_url": ""
     }
   },
   "sandbox": {
-    "client_type": "unified",
-    "docker_port": 8084,
+    "docker_port": 8080,
     "max_iterations": 30
   }
 }
 ```
 
-**Configuration Keys:**
+| Key | Description |
+|-----|-------------|
+| `controller.args.model` | Model name (e.g., `gpt-5.2`) |
+| `controller.args.api_key` | Your API key |
+| `controller.args.base_url` | Custom endpoint for local models (optional) |
+| `sandbox.docker_port` | Port for sandbox container (default: 8080) |
+| `sandbox.max_iterations` | Max agent iterations per task (default: 30) |
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `log_level` | string | Logging verbosity: DEBUG, INFO, WARNING, ERROR (default: INFO)|
-| `use_encrypted_tasks` | bool | Enable encrypted task files (default: false) |
-| `controller.type` | string | Agent type: "llm" (AI model) or "human" (interactive) |
-| `controller.args.model` | string | Model identifier (e.g., "gpt-5.1", "Qwen3-VL") |
-| `controller.args.base_url` | string | API endpoint (empty for OpenAI, required for local servers) |
-| `controller.args.api_key` | string | Authentication token |
-| `sandbox.client_type` | string | Sandbox mode: "unified" (all tools) or "browser" (UI only) |
-| `sandbox.docker_port` | int | Host port for sandbox access (default: 8080) |
-| `sandbox.max_iterations` | int | Maximum iterations per task before timeout |
+## ⚖️ Evaluation
 
-## Evaluation
+Each task includes a `test.py` that runs on the host machine after the agent completes. The framework calls `test(result)` with the full execution result and expects a pass/fail verdict.
 
-The system uses a **host-side evaluation approach** where the `test()` function in `test.py` validates task results.
-
-### Evaluation Method: `test.py`
-
-The evaluation script runs on the host machine after task completion. The framework:
-
-1. Loads the `test()` function from `test.py` in the task directory
-2. Calls `test(result)` with the complete execution result dictionary
-3. Expects a dictionary return value with evaluation results
-
-**Function Signature:**
 ```python
 def test(result: dict) -> dict:
     """Evaluate task results after execution.
 
     Args:
         result: Complete execution result containing:
+            - task_result: Agent's final answer
             - conversation: Full message history with controller
             - execution_trace: All actions and their outputs
             - status: Task status ("success" or "failed")
@@ -109,161 +182,32 @@ def test(result: dict) -> dict:
     """
 ```
 
-**Return Format:**
-```python
-{
-    "passed": True,                    # Required: Whether task passed
-    "feedback": "Task completed successfully",  # Required: Human-readable message
-    "details": {                       # Optional: Additional metrics
-        "key1": "value1",
-        "key2": "value2"
-    }
+> [!TIP]
+> Most `test.py` scripts first try to extract the answer from `task_result`, then fall back to searching the `conversation` history. If you're using your own agent, you can typically just pass `task_result` with the agent's final answer.
+
+Results are saved to `results/<task-name>.json` when using the CocoaAgent framework.
+
+**Learn more:**
+
+- [📖 Evaluation Guide](docs/evaluation.md) — Complete result dictionary structure and return format
+- [🔌 Sandbox API Reference](docs/sandbox-api.md) — How to access files and state inside the sandbox container
+
+## 🤝 Contributing New Tasks
+
+We welcome new benchmark tasks! See [contrib/CONTRIBUTING.md](contrib/CONTRIBUTING.md) for guidelines.
+
+> [!IMPORTANT]
+> Please encrypt your task before submitting a PR to keep benchmark data safe.
+
+## 📄 Citation
+
+```bibtex
+@misc{cocoabench2025,
+  title={CocoaBench: An Evaluation Framework for General Agents with Compositional Cognitive Abilities},
+  author={Shibo Hao and Zhining Zhang and Zhiqi Liang and Tianyang Liu and Zilong Wang and others},
+  howpublished={Blog post},
+  month={December},
+  year={2025},
+  url={https://cocoabench.github.io/}
 }
 ```
-
-**Result Dictionary Contents:**
-```python
-result = {
-    "task_name": "task-name",
-    "instruction": "Task instruction...",
-    "status": "success",  # or "failed"
-    "iterations": 5,
-    "conversation": [
-        {"role": "user", "content": "..."},
-        {"role": "assistant", "content": "..."}
-    ],
-    "execution_trace": [
-        {
-            "action": {"action_type": "shell", "command": "ls"},
-            "feedback": {"done": False, "message": "..."}
-        }
-    ],
-    "sandbox": {
-        "docker_port": 8080,
-        "client_type": "unified"
-    }
-}
-```
-
-### Sandbox API for Host-Side Scripts
-
-Call Sandbox APIs from `test.py` to inspect container state:
-
-```python
-from pathlib import Path
-import sys
-
-# Initialize sandbox client
-sandbox_sdk_path = Path(__file__).parent.parent / "sandbox" / "sdk" / "python"
-if sandbox_sdk_path.exists():
-    sys.path.insert(0, str(sandbox_sdk_path))
-    from agent_sandbox import Sandbox
-
-docker_port = result.get("sandbox", {}).get("docker_port", 8080)
-sandbox = Sandbox(base_url=f"http://localhost:{docker_port}")
-
-# Read file (text files, e.g., .txt, .md, .tex, etc.)
-content = sandbox.file.read_file(file="/home/gem/output.txt").data.content
-
-# List directory
-entries = sandbox.file.list_path(path="/home/gem").data.entries
-
-# Download file (binary files, e.g., .jpg, .png, .doc, .pptx, etc.)
-binary_data = sandbox.file.download_file(path="/home/gem/report.pdf")
-```
-
-**Common File APIs:**
-
-| Capability      | API                              | Returns                         |
-|-----------------|----------------------------------|---------------------------------|
-| Read file       | `sandbox.file.read_file(file=path)` | `.data.content` with full text (for text files, e.g., .txt, .md, .tex, etc.) |
-| List directory  | `sandbox.file.list_path(path=dir)`  | `.data.entries` list            |
-| Download file   | `sandbox.file.download_file(path=path)` | Binary data for streaming (for binary files, e.g., .jpg, .png, .doc, .pptx, etc.) |
-
-## Results
-
-Each task produces a JSON file in the output directory (e.g., `results/task-name.json`) with complete execution details.
-
-**Result Dictionary Fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `task_name` | string | Name of the task |
-| `instruction` | string | Original task instruction |
-| `status` | string | Task status: "success" or "failed" |
-| `iterations` | integer | Number of controller iterations |
-| `conversation` | array | Full conversation with controller (role/content pairs) |
-| `execution_trace` | array | List of actions and their feedback |
-| `eval` | object | Evaluation results from `test.py` |
-| `execution_time` | float | Total execution time in seconds |
-| `docker_port` | integer | Docker port used for this task |
-| `client_type` | string | Sandbox client type (unified, browser, etc.) |
-
-## Contributing
-
-We'd love your help in building CocoaBench! 🎉 Contributions of new benchmark tasks are very welcome.
-
-> 💡 Please remember to encrypt your task before submitting a PR — this keeps our benchmark data safe and ensures fair evaluation for everyone.
-
-### Quick Start for Contributors
-
-1. **Fork this repository** and clone your fork
-
-2. **Read the [Contribution Guide](contrib/CONTRIBUTING.md)**
-
-3. **Create your task** using the interactive wizard:
-   ```bash
-   cd contrib
-   python create_task.py
-   ```
-   Or manually create and revise `instruction.md`, `evaluation.md`, `solution.md`, `metadata.json` in `contributed-tasks/your-task-name/`
-
-4. **Validate and encrypt your task:**
-   ```bash
-   cd contrib
-   python validate_task.py <your-task-name>
-   python encrypt_tasks.py --task <your-task-name>
-   ```
-
-5. **Submit a Pull Request** — we look forward to seeing your task!
-
-### Contribution Tools
-
-| Tool | Description |
-|------|-------------|
-| `create_task.py` | Interactive wizard for creating new tasks |
-| `validate_task.py` | Validate task structure and encryption |
-| `encrypt_tasks.py` | Encrypt task files before submission (required!) |
-| `decrypt_tasks.py` | Decrypt task files for local editing |
-| `CONTRIBUTING.md` | Comprehensive guide for task creation |
-
-For detailed information on task requirements, file specifications, and best practices, see [`contrib/CONTRIBUTING.md`](contrib/CONTRIBUTING.md).
-
-## Setup
-
-### Prerequisites
-
-- Python 3.10+
-- Docker and Docker Compose (for running sandboxed tasks)
-- uv (Python package manager, recommended)
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   uv sync
-   ```
-
-3. Set up configuration file:
-   - Copy or create a config file in `configs/` directory
-   - Update the API key for your LLM provider
-   - Configure sandbox settings (docker_port, max_iterations, etc.)
-
-**Example configuration setup:**
-```bash
-cp configs/default_gpt.json configs/my-config.json
-# Edit my-config.json and set your API key
-python inference_main.py --config configs/my-config.json --tasks-dir tasks/ --output-dir results/
-```
-

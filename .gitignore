@@ -53,3 +53,7 @@ configs/*
 !configs/default_human.json
 !configs/default_gpt.json
 
+# dataset files
+cocoa-bench-v0.1/
+*.zip
+
