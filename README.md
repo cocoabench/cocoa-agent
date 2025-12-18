@@ -71,31 +71,13 @@ ls cocoa-bench-v0.1/
 
 | File | Purpose |
 |------|---------|
-| `task.yaml` | Task instructions to give your agent |
+| `task.yaml` | Task instruction to give your agent |
 | `test.py` | Evaluation script with `test(result)` function |
-| `Dockerfile` | Task environment (optional, for sandbox setup) |
-| `docker-compose.yaml` | Docker config (optional) |
+| `Dockerfile` | Task environment setup |
+| `docker-compose.yaml` | Docker config |
+| `assets/` | Additional files for the task (optional) |
 
-**To evaluate your agent's output:**
-
-```python
-import sys
-sys.path.insert(0, "cocoa-bench-v0.1/eight-puzzle-game")
-from test import test
-
-# Construct a result dict with your agent's output
-result = {
-    "status": "success",
-    "task_result": "...",  # Agent's final answer
-    "conversation": [...],  # Full conversation history (optional)
-}
-
-print(test(result))
-# → {"passed": True/False, "feedback": "..."}
-```
-
-> [!NOTE]
-> Each task has its own answer format (string, number, JSON, etc.). Check `task.yaml` for the expected output format and `test.py` for evaluation logic.
+**Evaluation:** Each `test.py` exports a `test(result)` function. If you're using your own agent, you typically just need to pass `{"task_result": "<agent's final answer>"}`. See [Evaluation](#evaluation) for details.
 
 ### Option B: Run with CocoaAgent Framework
 
@@ -126,9 +108,6 @@ python inference_main.py \
 ```
 
 ## ⚙️ Configuration
-
-> [!IMPORTANT]
-> Please encrypt your task before submitting a PR to keep benchmark data safe.
 
 
 ```json
