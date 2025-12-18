@@ -217,7 +217,7 @@ Task:
 - **DOM/Text Actions (selector-based, no vision):**
   - `dom_get_text()`: Get page text (innerText of body, truncated if long)
   - `dom_get_html()`: Get page HTML (truncated if long)
-  - `dom_query_selector(selector, limit=20)`: List elements matching a CSS selector with tag/text/href summary
+  - `dom_query_selector(selector, limit=20)`: List elements with detailed attributes (tag, id, class, name, type, href, aria-label, role, text). Use to identify precise selectors before clicking.
   - `dom_extract_links(filter_pattern?, limit=50)`: Extract links (text + href) optionally filtered by substring
   - `dom_click(selector, nth=0, button?, click_count?)`: Click an element matched by CSS selector (0-based index)
 

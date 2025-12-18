@@ -363,7 +363,7 @@ def get_browser_tools() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "dom_query_selector",
-                "description": "Query elements with a CSS selector and summarize tag/text/href (no vision).",
+                "description": "Query elements with a CSS selector and return detailed info: tag, id, class, name, type, href, aria-label, role, text. Use this to identify precise selectors before clicking.",
                 "parameters": {
                     "type": "object",
                     "properties": {

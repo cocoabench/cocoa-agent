@@ -406,13 +406,18 @@ class BrowserSandboxClient(SandboxClient):
             
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
-                return future.result(timeout=30)
+                return future.result(timeout=60)  # Increased timeout for complex pages
         except RuntimeError:
             # No running event loop, use asyncio.run()
             return asyncio.run(coro)
 
-    def _with_page(self, func):
-        """Connect to the running browser via CDP and run an async function on the active page."""
+    def _with_page(self, func, wait_timeout: int = 5000):
+        """Connect to the running browser via CDP and run an async function on the active page.
+        
+        Args:
+            func: Async function that takes a page and returns a result
+            wait_timeout: Timeout in ms for waiting for page load (default 5000ms, use 0 to skip wait)
+        """
         import asyncio
         from playwright.async_api import async_playwright
 
@@ -423,7 +428,13 @@ class BrowserSandboxClient(SandboxClient):
                 try:
                     context = browser.contexts[0] if browser.contexts else await browser.new_context()
                     page = context.pages[0] if context.pages else await context.new_page()
-                    await page.wait_for_load_state("domcontentloaded")
+                    # Use shorter timeout for DOM operations on already-loaded pages
+                    if wait_timeout > 0:
+                        try:
+                            await page.wait_for_load_state("domcontentloaded", timeout=wait_timeout)
+                        except Exception:
+                            # If page is already loaded or timeout, continue anyway
+                            pass
                     return await func(page)
                 finally:
                     # Closing the Playwright client disconnects but does not shut down the remote browser
@@ -437,7 +448,7 @@ class BrowserSandboxClient(SandboxClient):
             async def op(page):
                 return await page.inner_text("body")
 
-            text = self._with_page(lambda page: op(page))
+            text = self._with_page(lambda page: op(page), wait_timeout=5000)
             if text is None:
                 return "Page text is empty."
             if len(text) > max_chars:
@@ -453,7 +464,7 @@ class BrowserSandboxClient(SandboxClient):
             async def op(page):
                 return await page.content()
 
-            html = self._with_page(lambda page: op(page))
+            html = self._with_page(lambda page: op(page), wait_timeout=5000)
             if html is None:
                 return "Page HTML is empty."
             if len(html) > max_chars:
@@ -464,7 +475,7 @@ class BrowserSandboxClient(SandboxClient):
             return f"Failed to get page HTML: {str(e)}"
 
     def _dom_query_selector(self, selector: str, limit: int = 20) -> str:
-        """Query elements via CSS selector and summarize text/tag."""
+        """Query elements via CSS selector and summarize tag/text/href/class/id/name for precise selection."""
         try:
             async def op(page):
                 elements = await page.query_selector_all(selector)
@@ -478,23 +489,72 @@ class BrowserSandboxClient(SandboxClient):
                         tag = await element.evaluate("el => el.tagName")
                     except Exception:
                         tag = "UNKNOWN"
-                    try:
-                        href = await element.get_attribute("href")
-                    except Exception:
-                        href = None
-                    snippet = text[:200].replace("\n", " ").strip()
-                    info = f"{i+1}. <{tag}>"
-                    if href:
-                        info += f" href={href}"
-                    if snippet:
-                        info += f" text=\"{snippet}\""
-                    results.append(info)
+                    # Get key attributes for precise selection
+                    attrs = {}
+                    for attr_name in ["id", "class", "name", "type", "href", "role", "aria-label"]:
+                        try:
+                            val = await element.get_attribute(attr_name)
+                            if val:
+                                attrs[attr_name] = val
+                        except Exception:
+                            pass
+                    
+                    # Build info string
+                    info_parts = [f"{i+1}. <{tag}>"]
+                    
+                    # Add id if present (most specific)
+                    if "id" in attrs:
+                        info_parts.append(f"id=\"{attrs['id']}\"")
+                    
+                    # Add class if present
+                    if "class" in attrs:
+                        # Truncate long class lists
+                        class_val = attrs["class"]
+                        if len(class_val) > 100:
+                            class_val = class_val[:100] + "..."
+                        info_parts.append(f"class=\"{class_val}\"")
+                    
+                    # Add name if present
+                    if "name" in attrs:
+                        info_parts.append(f"name=\"{attrs['name']}\"")
+                    
+                    # Add type if present (for inputs)
+                    if "type" in attrs:
+                        info_parts.append(f"type=\"{attrs['type']}\"")
+                    
+                    # Add href if present
+                    if "href" in attrs:
+                        href_val = attrs["href"]
+                        if len(href_val) > 80:
+                            href_val = href_val[:80] + "..."
+                        info_parts.append(f"href=\"{href_val}\"")
+                    
+                    # Add aria-label if present (accessibility)
+                    if "aria-label" in attrs:
+                        aria_val = attrs["aria-label"]
+                        if len(aria_val) > 60:
+                            aria_val = aria_val[:60] + "..."
+                        info_parts.append(f"aria-label=\"{aria_val}\"")
+                    
+                    # Add role if present
+                    if "role" in attrs:
+                        info_parts.append(f"role=\"{attrs['role']}\"")
+                    
+                    # Add text snippet (truncated)
+                    if text:
+                        snippet = text[:150].replace("\n", " ").strip()
+                        if len(text) > 150:
+                            snippet += "..."
+                        info_parts.append(f"text=\"{snippet}\"")
+                    
+                    results.append(" ".join(info_parts))
+                
                 extra = ""
                 if len(elements) > limit:
                     extra = f"\n... and {len(elements) - limit} more elements"
                 return f"Found {len(elements)} element(s) matching selector '{selector}':\n" + "\n".join(results) + extra
 
-            return self._with_page(lambda page: op(page))
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
         except Exception as e:
             logger.error(f"Failed to query selector: {e}")
             return f"Failed to query selector: {str(e)}"
@@ -528,7 +588,7 @@ class BrowserSandboxClient(SandboxClient):
                 )
                 return header + (":\n" + "\n".join(summary) if summary else "")
 
-            return self._with_page(lambda page: op(page))
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
         except Exception as e:
             logger.error(f"Failed to extract links: {e}")
             return f"Failed to extract links: {str(e)}"
@@ -563,7 +623,7 @@ class BrowserSandboxClient(SandboxClient):
                     text = ""
                 return f"Clicked element {idx+1}/{len(elements)} matching '{selector}' (button={button}, clicks={click_count}). Text: {text[:120]}"
 
-            return self._with_page(lambda page: op(page))
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
         except Exception as e:
             logger.error(f"Failed to click selector: {e}")
             return f"Failed to click selector: {str(e)}"
