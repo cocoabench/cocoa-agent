@@ -8,11 +8,11 @@
 </p>
 
 <p align="center">
-  [![Website](https://img.shields.io/badge/🌐_Website-3E2723?style=flat)](https://cocoabench.github.io/)
-  [![Blog](https://img.shields.io/badge/📝_Blog-5D4037?style=flat)](https://cocoabench.github.io/blog.html)
-  [![Leaderboard](https://img.shields.io/badge/🏆_Leaderboard-795548?style=flat)](https://cocoabench.github.io/leaderboard.html)
-  [![Python](https://img.shields.io/badge/🐍_Python_3.13+-8D6E63?style=flat)](https://www.python.org/)
-  [![License](https://img.shields.io/badge/📄_MIT_License-A1887F?style=flat)](LICENSE)
+  <a href="https://cocoabench.github.io/"><img src="https://img.shields.io/badge/🌐_Website-3E2723?style=flat" alt="Website"></a>
+  <a href="https://cocoabench.github.io/blog.html"><img src="https://img.shields.io/badge/📝_Blog-5D4037?style=flat" alt="Blog"></a>
+  <a href="https://cocoabench.github.io/leaderboard.html"><img src="https://img.shields.io/badge/🏆_Leaderboard-795548?style=flat" alt="Leaderboard"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/🐍_Python_3.13+-8D6E63?style=flat" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/📄_MIT_License-A1887F?style=flat" alt="License"></a>
 </p>
 
 <br>
