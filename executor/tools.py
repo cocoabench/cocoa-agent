@@ -398,6 +398,278 @@ def get_browser_tools() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "dom_hover",
+                "description": "Hover over a DOM element using a CSS selector (text-based, no coordinates).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector to identify element(s) to hover over"
+                        },
+                        "nth": {
+                            "type": "integer",
+                            "description": "Zero-based index of the matched element to hover over (default 0)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds for the hover (default 2000)"
+                        }
+                    },
+                    "required": ["selector"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_type",
+                "description": "Type text into a DOM element using a CSS selector (text-based, no coordinates). Useful for filling input fields, textareas, etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS selector to identify element(s) to type into"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type into the element"
+                        },
+                        "nth": {
+                            "type": "integer",
+                            "description": "Zero-based index of the matched element to type into (default 0)"
+                        },
+                        "clear_first": {
+                            "type": "boolean",
+                            "description": "Whether to clear the element's value before typing (default true)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds for the typing (default 2000)"
+                        }
+                    },
+                    "required": ["selector", "text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_press",
+                "description": "Press a key on the page or on a specific element. Useful for submitting forms (Enter), navigating (Tab, Arrow keys), etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "Key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown', 'PageDown', etc.)"
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "Optional CSS selector to identify element to press key on. If not provided, key is pressed on the page."
+                        },
+                        "nth": {
+                            "type": "integer",
+                            "description": "Zero-based index of the matched element (default 0, only used if selector is provided)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["key"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_scroll",
+                "description": "Scroll the page or a specific element. Useful for revealing content that's out of view.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "enum": ["up", "down", "left", "right"],
+                            "description": "Direction to scroll (default 'down')"
+                        },
+                        "amount": {
+                            "type": "integer",
+                            "description": "Amount to scroll in pixels (default 500)"
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "Optional CSS selector to identify element to scroll. If not provided, scrolls the page."
+                        },
+                        "nth": {
+                            "type": "integer",
+                            "description": "Zero-based index of the matched element (default 0, only used if selector is provided)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_mark_elements",
+                "description": "Mark all interactive elements on the page with unique BIDs (Browser IDentifiers) and return a list of all marked elements with their attributes. This provides a structured view of what elements can be interacted with. Use this before BID-based operations to see what elements are available.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_elements": {
+                            "type": "integer",
+                            "description": "Maximum number of elements to mark and return (default 100)"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_click_bid",
+                "description": "Click an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements. This is more reliable than selector-based clicking as it uses direct element references.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to click (e.g., 'bid1', 'bid2')"
+                        },
+                        "button": {
+                            "type": "string",
+                            "enum": ["left", "right", "middle"],
+                            "description": "Mouse button to use (default left)"
+                        },
+                        "click_count": {
+                            "type": "integer",
+                            "enum": [1, 2],
+                            "description": "Number of clicks (1=click, 2=double click)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_hover_bid",
+                "description": "Hover over an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to hover over (e.g., 'bid1', 'bid2')"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_type_bid",
+                "description": "Type text into an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements. Useful for filling input fields.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to type into (e.g., 'bid1', 'bid2')"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type into the element"
+                        },
+                        "clear_first": {
+                            "type": "boolean",
+                            "description": "Whether to clear the element's value before typing (default true)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid", "text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_press_bid",
+                "description": "Press a key on an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements. Useful for submitting forms, navigating, etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to press key on (e.g., 'bid1', 'bid2')"
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown')"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid", "key"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_scroll_bid",
+                "description": "Scroll an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to scroll (e.g., 'bid1', 'bid2')"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["up", "down", "left", "right"],
+                            "description": "Direction to scroll (default 'down')"
+                        },
+                        "amount": {
+                            "type": "integer",
+                            "description": "Amount to scroll in pixels (default 500)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "task_complete",
                 "description": "Mark the task as complete and exit. Optionally provide the final result/answer if the task requires returning a specific output (e.g., JSON answer). For tasks that generate files in the sandbox, you can omit the result parameter.",
                 "parameters": {
@@ -789,6 +1061,16 @@ def map_tool_call_to_action(tool_name: str, arguments: Dict[str, Any]) -> Dict[s
         "dom_query_selector": {"selector", "limit"},
         "dom_extract_links": {"filter_pattern", "limit"},
         "dom_click": {"selector", "nth", "button", "click_count", "timeout_ms"},
+        "dom_hover": {"selector", "nth", "timeout_ms"},
+        "dom_type": {"selector", "text", "nth", "clear_first", "timeout_ms"},
+        "dom_press": {"key", "selector", "nth", "timeout_ms"},
+        "dom_scroll": {"direction", "amount", "selector", "nth", "timeout_ms"},
+        "dom_mark_elements": {"max_elements"},
+        "dom_click_bid": {"bid", "button", "click_count", "timeout_ms"},
+        "dom_hover_bid": {"bid", "timeout_ms"},
+        "dom_type_bid": {"bid", "text", "clear_first", "timeout_ms"},
+        "dom_press_bid": {"bid", "key", "timeout_ms"},
+        "dom_scroll_bid": {"bid", "direction", "amount", "timeout_ms"},
         "file_read": {"path"},
         "file_write": {"path", "content"},
         "file_list": {"path"},

@@ -53,7 +53,9 @@ def is_browser_action(action: Dict[str, Any]) -> bool:
         "browser_scroll", "browser_move_to", "browser_move_rel", "browser_drag_to", "browser_drag_rel",
         "browser_wait",
         "dom_get_text", "dom_get_html", "dom_query_selector",
-        "dom_extract_links", "dom_click", "browser_navigate",
+        "dom_extract_links", "dom_click", "dom_hover", "dom_type", "dom_press", "dom_scroll",
+        "dom_mark_elements", "dom_click_bid", "dom_hover_bid", "dom_type_bid", "dom_press_bid", "dom_scroll_bid",
+        "browser_navigate",
         "browser_screenshot", "browser_get_viewport_info",
     ]
     return action_type in browser_action_types

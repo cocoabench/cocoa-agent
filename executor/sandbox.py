@@ -627,6 +627,364 @@ class BrowserSandboxClient(SandboxClient):
             logger.error(f"Failed to click selector: {e}")
             return f"Failed to click selector: {str(e)}"
 
+    def _dom_hover(
+        self,
+        selector: str,
+        nth: int = 0,
+        timeout_ms: int = 2000,
+    ) -> str:
+        """Hover over a DOM element using a CSS selector (and optional index)."""
+        try:
+            async def op(page):
+                elements = await page.query_selector_all(selector)
+                if not elements:
+                    return f"No element found for selector '{selector}'"
+                idx = min(max(nth, 0), len(elements) - 1)
+                target = elements[idx]
+                await target.scroll_into_view_if_needed(timeout=timeout_ms)
+                await target.hover(timeout=timeout_ms)
+                try:
+                    text = await target.inner_text()
+                    text = text.strip().replace("\n", " ")
+                except Exception:
+                    text = ""
+                return f"Hovered over element {idx+1}/{len(elements)} matching '{selector}'. Text: {text[:120]}"
+
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to hover over selector: {e}")
+            return f"Failed to hover over selector: {str(e)}"
+
+    def _dom_type(
+        self,
+        selector: str,
+        text: str,
+        nth: int = 0,
+        clear_first: bool = True,
+        timeout_ms: int = 2000,
+    ) -> str:
+        """Type text into a DOM element using a CSS selector (and optional index)."""
+        try:
+            async def op(page):
+                elements = await page.query_selector_all(selector)
+                if not elements:
+                    return f"No element found for selector '{selector}'"
+                idx = min(max(nth, 0), len(elements) - 1)
+                target = elements[idx]
+                await target.scroll_into_view_if_needed(timeout=timeout_ms)
+                
+                if clear_first:
+                    await target.fill("", timeout=timeout_ms)
+                
+                await target.type(text, timeout=timeout_ms)
+                
+                try:
+                    final_value = await target.input_value()
+                except Exception:
+                    final_value = text
+                
+                return f"Typed into element {idx+1}/{len(elements)} matching '{selector}'. Final value: {final_value[:120]}"
+
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to type into selector: {e}")
+            return f"Failed to type into selector: {str(e)}"
+
+    def _dom_press(
+        self,
+        key: str,
+        selector: str | None = None,
+        nth: int = 0,
+        timeout_ms: int = 2000,
+    ) -> str:
+        """Press a key on the page or on a specific element."""
+        try:
+            async def op(page):
+                if selector:
+                    elements = await page.query_selector_all(selector)
+                    if not elements:
+                        return f"No element found for selector '{selector}'"
+                    idx = min(max(nth, 0), len(elements) - 1)
+                    target = elements[idx]
+                    await target.scroll_into_view_if_needed(timeout=timeout_ms)
+                    await target.press(key, timeout=timeout_ms)
+                    return f"Pressed key '{key}' on element {idx+1}/{len(elements)} matching '{selector}'"
+                else:
+                    await page.keyboard.press(key)
+                    return f"Pressed key '{key}' on page"
+
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to press key: {e}")
+            return f"Failed to press key: {str(e)}"
+
+    def _dom_scroll(
+        self,
+        direction: str = "down",
+        amount: int = 500,
+        selector: str | None = None,
+        nth: int = 0,
+        timeout_ms: int = 2000,
+    ) -> str:
+        """Scroll the page or a specific element."""
+        try:
+            async def op(page):
+                if selector:
+                    elements = await page.query_selector_all(selector)
+                    if not elements:
+                        return f"No element found for selector '{selector}'"
+                    idx = min(max(nth, 0), len(elements) - 1)
+                    target = elements[idx]
+                    
+                    if direction == "down":
+                        await target.evaluate(f"el => el.scrollTop += {amount}")
+                    elif direction == "up":
+                        await target.evaluate(f"el => el.scrollTop -= {amount}")
+                    elif direction == "left":
+                        await target.evaluate(f"el => el.scrollLeft -= {amount}")
+                    elif direction == "right":
+                        await target.evaluate(f"el => el.scrollLeft += {amount}")
+                    
+                    return f"Scrolled {direction} by {amount}px on element {idx+1}/{len(elements)} matching '{selector}'"
+                else:
+                    if direction == "down":
+                        await page.evaluate(f"window.scrollBy(0, {amount})")
+                    elif direction == "up":
+                        await page.evaluate(f"window.scrollBy(0, -{amount})")
+                    elif direction == "left":
+                        await page.evaluate(f"window.scrollBy(-{amount}, 0)")
+                    elif direction == "right":
+                        await page.evaluate(f"window.scrollBy({amount}, 0)")
+                    
+                    return f"Scrolled page {direction} by {amount}px"
+
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to scroll: {e}")
+            return f"Failed to scroll: {str(e)}"
+
+    def _dom_mark_elements_and_extract(self, max_elements: int = 100) -> str:
+        """Mark interactive elements with unique BIDs and return structured list with context."""
+        try:
+            async def op(page):
+                # JavaScript to inject BIDs and extract interactive elements
+                js_code = """
+                () => {
+                    // Clear previous marks
+                    document.querySelectorAll('[data-cocoa-bid]').forEach(el => {
+                        el.removeAttribute('data-cocoa-bid');
+                    });
+                    
+                    // Interactive element selectors
+                    const interactiveSelectors = [
+                        'a[href]',
+                        'button',
+                        'input',
+                        'textarea',
+                        'select',
+                        '[role="button"]',
+                        '[role="link"]',
+                        '[role="tab"]',
+                        '[role="menuitem"]',
+                        '[onclick]',
+                        '[contenteditable="true"]'
+                    ];
+                    
+                    // Get all interactive elements
+                    const elements = document.querySelectorAll(interactiveSelectors.join(','));
+                    const results = [];
+                    let bid = 1;
+                    
+                    for (const el of elements) {
+                        // Skip if not visible
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        if (rect.width === 0 || rect.height === 0 || 
+                            style.display === 'none' || style.visibility === 'hidden') {
+                            continue;
+                        }
+                        
+                        // Assign BID
+                        const bidStr = `bid${bid}`;
+                        el.setAttribute('data-cocoa-bid', bidStr);
+                        
+                        // Extract element info
+                        const tag = el.tagName.toLowerCase();
+                        const text = (el.innerText || el.textContent || '').trim().substring(0, 150);
+                        const value = el.value || '';
+                        const placeholder = el.placeholder || '';
+                        const type = el.type || '';
+                        const href = el.href || '';
+                        const id = el.id || '';
+                        const className = el.className || '';
+                        const role = el.getAttribute('role') || '';
+                        const ariaLabel = el.getAttribute('aria-label') || '';
+                        const name = el.name || '';
+                        
+                        // Build readable description
+                        let description = `<${tag}>`;
+                        if (id) description += ` id="${id}"`;
+                        if (type) description += ` type="${type}"`;
+                        if (role) description += ` role="${role}"`;
+                        if (ariaLabel) description += ` aria-label="${ariaLabel}"`;
+                        if (name) description += ` name="${name}"`;
+                        if (text) description += ` text="${text}"`;
+                        if (value) description += ` value="${value}"`;
+                        if (placeholder) description += ` placeholder="${placeholder}"`;
+                        if (href) description += ` href="${href.substring(0, 80)}"`;
+                        
+                        results.push({
+                            bid: bidStr,
+                            description: description
+                        });
+                        
+                        bid++;
+                        if (bid > """ + str(max_elements) + """) break;
+                    }
+                    
+                    return results;
+                }
+                """
+                
+                elements_info = await page.evaluate(js_code)
+                
+                if not elements_info:
+                    return "No interactive elements found on page"
+                
+                # Format output
+                lines = [f"Found {len(elements_info)} interactive element(s):"]
+                for elem in elements_info:
+                    lines.append(f"[{elem['bid']}] {elem['description']}")
+                
+                return "\n".join(lines)
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to mark elements and extract: {e}")
+            return f"Failed to mark elements and extract: {str(e)}"
+
+    def _dom_click_bid(self, bid: str, button: str = "left", click_count: int = 1, timeout_ms: int = 2000) -> str:
+        """Click a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"No element found with BID '{bid}'"
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                await element.click(button=button, click_count=click_count, timeout=timeout_ms, force=True)
+                
+                try:
+                    text = await element.inner_text()
+                    text = text.strip().replace("\n", " ")
+                except Exception:
+                    text = ""
+                
+                return f"Clicked element with BID '{bid}' (button={button}, clicks={click_count}). Text: {text[:120]}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to click BID: {e}")
+            return f"Failed to click BID: {str(e)}"
+
+    def _dom_hover_bid(self, bid: str, timeout_ms: int = 2000) -> str:
+        """Hover over a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"No element found with BID '{bid}'"
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                await element.hover(timeout=timeout_ms)
+                
+                try:
+                    text = await element.inner_text()
+                    text = text.strip().replace("\n", " ")
+                except Exception:
+                    text = ""
+                
+                return f"Hovered over element with BID '{bid}'. Text: {text[:120]}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to hover BID: {e}")
+            return f"Failed to hover BID: {str(e)}"
+
+    def _dom_type_bid(self, bid: str, text: str, clear_first: bool = True, timeout_ms: int = 2000) -> str:
+        """Type text into a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"No element found with BID '{bid}'"
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                
+                if clear_first:
+                    await element.fill("", timeout=timeout_ms)
+                
+                await element.type(text, timeout=timeout_ms)
+                
+                try:
+                    final_value = await element.input_value()
+                except Exception:
+                    final_value = text
+                
+                return f"Typed into element with BID '{bid}'. Final value: {final_value[:120]}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to type into BID: {e}")
+            return f"Failed to type into BID: {str(e)}"
+
+    def _dom_press_bid(self, bid: str, key: str, timeout_ms: int = 2000) -> str:
+        """Press a key on a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"No element found with BID '{bid}'"
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                await element.press(key, timeout=timeout_ms)
+                
+                return f"Pressed key '{key}' on element with BID '{bid}'"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to press key on BID: {e}")
+            return f"Failed to press key on BID: {str(e)}"
+
+    def _dom_scroll_bid(self, bid: str, direction: str = "down", amount: int = 500, timeout_ms: int = 2000) -> str:
+        """Scroll a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"No element found with BID '{bid}'"
+                
+                if direction == "down":
+                    await element.evaluate(f"el => el.scrollTop += {amount}")
+                elif direction == "up":
+                    await element.evaluate(f"el => el.scrollTop -= {amount}")
+                elif direction == "left":
+                    await element.evaluate(f"el => el.scrollLeft -= {amount}")
+                elif direction == "right":
+                    await element.evaluate(f"el => el.scrollLeft += {amount}")
+                
+                return f"Scrolled {direction} by {amount}px on element with BID '{bid}'"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to scroll BID: {e}")
+            return f"Failed to scroll BID: {str(e)}"
+
     def _navigate_to_url(self, url: str) -> str:
         """Navigate browser to a URL via CDP + Playwright."""
         if not url:
@@ -729,6 +1087,151 @@ class BrowserSandboxClient(SandboxClient):
                     nth=action.get("nth", 0),
                     button=action.get("button", "left"),
                     click_count=action.get("click_count", 1),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_hover":
+            selector = action.get("selector")
+            if not selector:
+                feedback = {"done": False, "message": "selector is required for dom_hover"}
+            else:
+                message = self._dom_hover(
+                    selector=selector,
+                    nth=action.get("nth", 0),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_type":
+            selector = action.get("selector")
+            text = action.get("text")
+            if not selector:
+                feedback = {"done": False, "message": "selector is required for dom_type"}
+            elif text is None:
+                feedback = {"done": False, "message": "text is required for dom_type"}
+            else:
+                message = self._dom_type(
+                    selector=selector,
+                    text=text,
+                    nth=action.get("nth", 0),
+                    clear_first=action.get("clear_first", True),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_press":
+            key = action.get("key")
+            if not key:
+                feedback = {"done": False, "message": "key is required for dom_press"}
+            else:
+                message = self._dom_press(
+                    key=key,
+                    selector=action.get("selector"),
+                    nth=action.get("nth", 0),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_scroll":
+            message = self._dom_scroll(
+                direction=action.get("direction", "down"),
+                amount=action.get("amount", 500),
+                selector=action.get("selector"),
+                nth=action.get("nth", 0),
+                timeout_ms=action.get("timeout_ms", 2000),
+            )
+            feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_mark_elements":
+            max_elements = action.get("max_elements", 100)
+            message = self._dom_mark_elements_and_extract(max_elements=max_elements)
+            feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_click_bid":
+            bid = action.get("bid")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_click_bid"}
+            else:
+                message = self._dom_click_bid(
+                    bid=bid,
+                    button=action.get("button", "left"),
+                    click_count=action.get("click_count", 1),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_hover_bid":
+            bid = action.get("bid")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_hover_bid"}
+            else:
+                message = self._dom_hover_bid(
+                    bid=bid,
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_type_bid":
+            bid = action.get("bid")
+            text = action.get("text")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_type_bid"}
+            elif text is None:
+                feedback = {"done": False, "message": "text is required for dom_type_bid"}
+            else:
+                message = self._dom_type_bid(
+                    bid=bid,
+                    text=text,
+                    clear_first=action.get("clear_first", True),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_press_bid":
+            bid = action.get("bid")
+            key = action.get("key")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_press_bid"}
+            elif not key:
+                feedback = {"done": False, "message": "key is required for dom_press_bid"}
+            else:
+                message = self._dom_press_bid(
+                    bid=bid,
+                    key=key,
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_scroll_bid":
+            bid = action.get("bid")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_scroll_bid"}
+            else:
+                message = self._dom_scroll_bid(
+                    bid=bid,
+                    direction=action.get("direction", "down"),
+                    amount=action.get("amount", 500),
                     timeout_ms=action.get("timeout_ms", 2000),
                 )
                 feedback = {"done": False, "message": message}
@@ -904,7 +1407,9 @@ class UnifiedSandboxClient(SandboxClient):
                               "browser_scroll", "browser_move_to", "browser_move_rel", "browser_drag_to", "browser_drag_rel",
                               "browser_wait",
                               "dom_get_text", "dom_get_html", "dom_query_selector",
-                              "dom_extract_links", "dom_click", "browser_navigate",
+                              "dom_extract_links", "dom_click", "dom_hover", "dom_type", "dom_press", "dom_scroll",
+                              "dom_mark_elements", "dom_click_bid", "dom_hover_bid", "dom_type_bid", "dom_press_bid", "dom_scroll_bid",
+                              "browser_navigate",
                               "browser_screenshot", "browser_get_viewport_info",
                               ]:
                 return self._handle_browser_action(action)

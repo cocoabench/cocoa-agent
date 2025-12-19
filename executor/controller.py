@@ -105,11 +105,29 @@ Task:
 
 
 #### DOM Actions (Selector-based, no vision required)
+
+**Observation Actions:**
 - `dom_get_text()`: Get page text (innerText of body, truncated if long)
 - `dom_get_html()`: Get page HTML (truncated if long)
 - `dom_query_selector(selector, limit?)`: List elements with detailed attributes (tag, id, class, name, type, href, aria-label, role, text). Use to identify precise selectors before clicking.
 - `dom_extract_links(filter_pattern?, limit?)`: Extract links (text + href) optionally filtered by substring
+- `dom_mark_elements(max_elements?)`: **[RECOMMENDED]** Mark all interactive elements with unique BIDs and return structured list. Use this to get a comprehensive view of clickable/interactive elements with their attributes. More reliable than query_selector for complex pages.
+
+**Selector-based Interaction Actions:**
 - `dom_click(selector, nth?, button?, click_count?, timeout_ms?)`: Click an element matched by CSS selector (0-based index)
+- `dom_hover(selector, nth?, timeout_ms?)`: Hover over an element matched by CSS selector (0-based index)
+- `dom_type(selector, text, nth?, clear_first?, timeout_ms?)`: Type text into an element matched by CSS selector (0-based index)
+- `dom_press(key, selector?, nth?, timeout_ms?)`: Press a key on the page or on a specific element (e.g., 'Enter', 'Tab', 'Escape')
+- `dom_scroll(direction?, amount?, selector?, nth?, timeout_ms?)`: Scroll the page or a specific element (direction: 'up'/'down'/'left'/'right', amount in pixels)
+
+**BID-based Interaction Actions (More Reliable):**
+- `dom_click_bid(bid, button?, click_count?, timeout_ms?)`: Click an element by its BID (obtained from dom_mark_elements)
+- `dom_hover_bid(bid, timeout_ms?)`: Hover over an element by its BID
+- `dom_type_bid(bid, text, clear_first?, timeout_ms?)`: Type text into an element by its BID
+- `dom_press_bid(bid, key, timeout_ms?)`: Press a key on an element by its BID
+- `dom_scroll_bid(bid, direction?, amount?, timeout_ms?)`: Scroll an element by its BID
+
+**Note**: BID-based actions are more reliable than selector-based actions as they use direct element references. Use `dom_mark_elements` first to get BIDs, then use BID-based actions for interaction.
 
 ### File Tools
 - `file_read(path)`: Read file content
@@ -351,11 +369,29 @@ Task:
 
 
 #### DOM Actions (Selector-based, no vision required)
+
+**Observation Actions:**
 - `dom_get_text()`: Get page text (innerText of body, truncated if long)
 - `dom_get_html()`: Get page HTML (truncated if long)
 - `dom_query_selector(selector, limit?)`: List elements with detailed attributes (tag, id, class, name, type, href, aria-label, role, text). Use to identify precise selectors before clicking.
 - `dom_extract_links(filter_pattern?, limit?)`: Extract links (text + href) optionally filtered by substring
+- `dom_mark_elements(max_elements?)`: **[RECOMMENDED]** Mark all interactive elements with unique BIDs and return structured list. Use this to get a comprehensive view of clickable/interactive elements with their attributes. More reliable than query_selector for complex pages.
+
+**Selector-based Interaction Actions:**
 - `dom_click(selector, nth?, button?, click_count?, timeout_ms?)`: Click an element matched by CSS selector (0-based index)
+- `dom_hover(selector, nth?, timeout_ms?)`: Hover over an element matched by CSS selector (0-based index)
+- `dom_type(selector, text, nth?, clear_first?, timeout_ms?)`: Type text into an element matched by CSS selector (0-based index)
+- `dom_press(key, selector?, nth?, timeout_ms?)`: Press a key on the page or on a specific element (e.g., 'Enter', 'Tab', 'Escape')
+- `dom_scroll(direction?, amount?, selector?, nth?, timeout_ms?)`: Scroll the page or a specific element (direction: 'up'/'down'/'left'/'right', amount in pixels)
+
+**BID-based Interaction Actions (More Reliable):**
+- `dom_click_bid(bid, button?, click_count?, timeout_ms?)`: Click an element by its BID (obtained from dom_mark_elements)
+- `dom_hover_bid(bid, timeout_ms?)`: Hover over an element by its BID
+- `dom_type_bid(bid, text, clear_first?, timeout_ms?)`: Type text into an element by its BID
+- `dom_press_bid(bid, key, timeout_ms?)`: Press a key on an element by its BID
+- `dom_scroll_bid(bid, direction?, amount?, timeout_ms?)`: Scroll an element by its BID
+
+**Note**: BID-based actions are more reliable than selector-based actions as they use direct element references. Use `dom_mark_elements` first to get BIDs, then use BID-based actions for interaction.
 
 ### File Tools
 - `file_read(path)`: Read file content
