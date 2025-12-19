@@ -1141,7 +1141,7 @@ class BrowserSandboxClient(SandboxClient):
                     
                     return f"Scrolled {direction} by {amount}px on element with BID '{bid}'. {position_info}"
                 else:
-                    # Scroll the page
+                    # Scroll the page - try multiple strategies for modern SPA pages
                     scroll_info_before = await page.evaluate("""
                         () => ({
                             scrollY: window.scrollY,
@@ -1153,14 +1153,82 @@ class BrowserSandboxClient(SandboxClient):
                         })
                     """)
                     
-                    if direction == "down":
-                        await page.evaluate(f"window.scrollBy(0, {amount})")
-                    elif direction == "up":
-                        await page.evaluate(f"window.scrollBy(0, -{amount})")
-                    elif direction == "left":
-                        await page.evaluate(f"window.scrollBy(-{amount}, 0)")
-                    elif direction == "right":
-                        await page.evaluate(f"window.scrollBy({amount}, 0)")
+                    # Strategy 1: Try scrolling the main scrollable container if page itself isn't scrollable
+                    page_scrollable_x = scroll_info_before["scrollWidth"] > scroll_info_before["clientWidth"]
+                    page_scrollable_y = scroll_info_before["scrollHeight"] > scroll_info_before["clientHeight"]
+                    
+                    scroll_success = False
+                    scroll_target = "page"
+                    
+                    # If page isn't scrollable in target direction, try to find and scroll a container
+                    if (direction in ["left", "right"] and not page_scrollable_x) or \
+                       (direction in ["up", "down"] and not page_scrollable_y):
+                        # Find and scroll the largest scrollable container
+                        container_scrolled = await page.evaluate(f"""
+                            (direction, amount) => {{
+                                const allElements = document.querySelectorAll('*');
+                                let bestContainer = null;
+                                let bestSize = 0;
+                                
+                                for (const el of allElements) {{
+                                    if (el === document.body || el === document.documentElement) continue;
+                                    
+                                    const style = window.getComputedStyle(el);
+                                    const overflowX = style.overflowX;
+                                    const overflowY = style.overflowY;
+                                    
+                                    let isScrollable = false;
+                                    let scrollableSize = 0;
+                                    
+                                    if (direction === 'left' || direction === 'right') {{
+                                        isScrollable = (overflowX === 'auto' || overflowX === 'scroll') && 
+                                                      el.scrollWidth > el.clientWidth;
+                                        scrollableSize = el.scrollWidth - el.clientWidth;
+                                    }} else {{
+                                        isScrollable = (overflowY === 'auto' || overflowY === 'scroll') && 
+                                                      el.scrollHeight > el.clientHeight;
+                                        scrollableSize = el.scrollHeight - el.clientHeight;
+                                    }}
+                                    
+                                    if (isScrollable && scrollableSize > bestSize) {{
+                                        bestContainer = el;
+                                        bestSize = scrollableSize;
+                                    }}
+                                }}
+                                
+                                if (bestContainer) {{
+                                    if (direction === 'down') {{
+                                        bestContainer.scrollTop += amount;
+                                    }} else if (direction === 'up') {{
+                                        bestContainer.scrollTop -= amount;
+                                    }} else if (direction === 'left') {{
+                                        bestContainer.scrollLeft -= amount;
+                                    }} else if (direction === 'right') {{
+                                        bestContainer.scrollLeft += amount;
+                                    }}
+                                    return true;
+                                }}
+                                return false;
+                            }}
+                        """, direction, amount)
+                        
+                        if container_scrolled:
+                            scroll_success = True
+                            scroll_target = "container"
+                    
+                    # Strategy 2: Scroll the page/window (if not already scrolled via container)
+                    if not scroll_success:
+                        if direction == "down":
+                            await page.evaluate(f"window.scrollBy(0, {amount})")
+                        elif direction == "up":
+                            await page.evaluate(f"window.scrollBy(0, -{amount})")
+                        elif direction == "left":
+                            await page.evaluate(f"window.scrollBy(-{amount}, 0)")
+                        elif direction == "right":
+                            await page.evaluate(f"window.scrollBy({amount}, 0)")
+                    
+                    # Wait a bit for scroll to complete
+                    await page.wait_for_timeout(100)
                     
                     # Get scroll info after scrolling
                     scroll_info_after = await page.evaluate("""
@@ -1202,7 +1270,17 @@ class BrowserSandboxClient(SandboxClient):
                             percent = int((current / max_scroll) * 100) if max_scroll > 0 else 0
                             position_info += f" ({percent}%)"
                     
-                    return f"Scrolled page {direction} by {amount}px. {position_info}"
+                    # Check if scroll actually happened
+                    scroll_changed = False
+                    if direction in ["up", "down"]:
+                        scroll_changed = abs(scroll_info_after["scrollY"] - scroll_info_before["scrollY"]) > 1
+                    else:
+                        scroll_changed = abs(scroll_info_after["scrollX"] - scroll_info_before["scrollX"]) > 1
+                    
+                    if not scroll_changed and max_scroll <= 0:
+                        return f"WARNING: Page is not scrollable in {direction} direction. Content fits within viewport (scrollWidth={scroll_info_after['scrollWidth']}, clientWidth={scroll_info_after['clientWidth']}). Try scrolling a specific element by providing its BID from dom_mark_elements()."
+                    
+                    return f"Scrolled page {direction} by {amount}px ({scroll_target}). {position_info}"
             
             return self._with_page(lambda page: op(page), wait_timeout=5000)
         except Exception as e:
