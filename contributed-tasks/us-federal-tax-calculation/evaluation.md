@@ -12,6 +12,6 @@ Note: This is the Regular Taxes (Federal) only, not including Tax Due or penalti
 
 ## Agent Output Example
 
-Gemini 2.5 Flash: Passed ($16,121)
-GPT-4o: Failed (did not navigate to website)
-GPT-5.1: Failed (incorrect answer)
+Gemini 3 Pro Preview: **Passed** ($16,121) ✓
+Gemini 2.5 Flash: Failed (could not navigate to website - browser navigation issue)
+Gemini 2.0 Flash: Failed (navigated successfully but could not complete form within 30 iterations)
