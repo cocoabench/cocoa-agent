@@ -1,43 +1,46 @@
-Calculate the federal income tax for a married couple using the SmartAsset tax calculator.
+Calculate the federal income tax for a married couple using the PriorTax 2024 tax calculator.
 
-**Website:** https://smartasset.com/taxes/income-taxes
+**Website:** https://priortax.com/tax-calculator/2024/
 
 **Taxpayer Information:**
 
 - Filing Status: Married Filing Jointly
-- Location: Texas (no state income tax)
+- Your Age (on Dec 31, 2024): 35
+- Spouse Age (on Dec 31, 2024): 35
+- Valid SSN: Yes (both)
+- Being claimed as dependent: No (both)
+- Legally blind: No (both)
+- Disabled: No (both)
+- Number of dependents: 0
 
 **Income:**
-- Spouse 1 W-2 Wages: $85,000
-- Spouse 2 W-2 Wages: $62,000
-- Bank Interest Income: $450
+
+- Your W-2 Wages: $85,000
+- Spouse W-2 Wages: $62,450
 - **Total Household Income: $147,450**
-
-**Deductions/Contributions:**
-- 401(k) Contribution: $23,000 total ($15,000 + $8,000)
-- IRA Contribution: $0
-- Itemized Deductions: $0 (use standard deduction)
-
-**Other:**
-- Number of Dependents: 0
-- Number of State Personal Exemptions: 2
 
 **Task:**
 
-1. Navigate to the SmartAsset income tax calculator
-2. Enter the household income ($147,450)
-3. Select location as Texas
-4. Select filing status as Married Filing Jointly
-5. Open the "Advanced" section
-6. Enter 401(k) contribution ($23,000)
-7. Leave IRA contribution as $0
-8. Leave Itemized Deductions as $0
-9. Set Number of State Personal Exemptions to 2
-10. Find the calculated **Federal** income tax amount
+1. Navigate to the PriorTax 2024 tax calculator
+2. On the **Personal** tab:
+   - Select "Married Filing Jointly"
+   - Enter your age: 35
+   - Answer Yes for Valid SSN, No for all other questions
+   - Enter 0 dependents
+   - Enter spouse age: 35
+   - Answer Yes for spouse Valid SSN, No for all other spouse questions
+   - Click Continue
+3. On the **Job** tab:
+   - Enter your W-2 wages: $85,000
+   - Enter spouse W-2 wages: $62,450
+   - Click Continue
+4. On remaining tabs (Investments, Business, Other, Household, Expenses, Donations, Education, Retirement, Payments):
+   - Keep defaults, click Continue
+5. Find the calculated **Regular Taxes** (Federal income tax) amount
 
 **Output Format:**
 
-Submit only the Federal income tax amount (not FICA, not total):
+Submit only the Federal income tax amount (Regular Taxes):
 
 ```
 <answer>$XXXXX</answer>

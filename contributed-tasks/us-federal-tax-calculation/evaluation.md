@@ -2,15 +2,16 @@
 
 ## Initialization
 
-Host UI: https://smartasset.com/taxes/income-taxes
+Host UI: https://priortax.com/tax-calculator/2024/
 
 ## Evaluation Criteria
 
-The correct Federal income tax amount is **$10,677** (with ±$50 tolerance for minor rounding differences).
+The correct Federal income tax amount (Regular Taxes) is **$16,121** (with ±$50 tolerance for minor rounding differences).
 
-Note: This is the Federal tax only, not including FICA ($11,280) or total taxes ($21,957).
+Note: This is the Regular Taxes (Federal) only, not including Tax Due or penalties.
 
 ## Agent Output Example
 
-GPT-4o: [Pending test], ([Correct/Incorrect], [time])
-Chat transcript: [link to chat]
+Gemini 2.5 Flash: Passed ($16,121)
+GPT-4o: Failed (did not navigate to website)
+GPT-5.1: Failed (incorrect answer)

@@ -2,50 +2,64 @@
 
 ## Step 1: Navigate to the Calculator
 
-Go to https://smartasset.com/taxes/income-taxes
+Go to https://priortax.com/tax-calculator/2024/
 
-## Step 2: Enter Basic Information
+## Step 2: Personal Tab
 
-- **Household Income:** Enter $147,450 (sum of $85,000 + $62,000 + $450)
-- **Location:** Select "Texas" (or type "Texas City, TX")
+Fill in the following:
+
 - **Filing Status:** Select "Married Filing Jointly"
+- **Your age on Dec 31, 2024:** 35
+- **Valid SSN:** Yes
+- **Being claimed as dependent:** No
+- **Legally blind:** No
+- **Disabled:** No
+- **How many dependents:** 0
+- **Spouse age on Dec 31, 2024:** 35
+- **Spouse valid SSN:** Yes
+- **Spouse being claimed as dependent:** No
+- **Spouse legally blind:** No
+- **Spouse disabled:** No
 
-## Step 3: Open Advanced Settings
+Click **Continue**.
 
-Click on "Advanced" to expand additional options.
+## Step 3: Job Tab
 
-## Step 4: Enter Advanced Information
+- **Your W-2 Wages:** $85,000
+- **Spouse W-2 Wages:** $62,450
 
-- **401(k) Contribution:** Enter $23,000
-- **IRA Contribution:** Leave as $0
-- **Itemized Deductions:** Leave as $0
-- **Number of State Personal Exemptions:** Enter 2
+Click **Continue**.
+
+## Step 4: Remaining Tabs
+
+For all remaining tabs (Investments, Business, Other, Household, Expenses, Donations, Education, Retirement, Payments):
+- Keep all default values
+- Click **Continue** on each
 
 ## Step 5: Read the Result
 
-The calculator displays a tax breakdown table:
+The calculator displays:
 
-| Tax Type | Marginal Tax Rate | Effective Tax Rate | 2025 Taxes |
-|----------|-------------------|--------------------|-----------:|
-| Federal  | 12.00%            | 7.24%              | **$10,677** |
-| FICA     | 7.65%             | 7.65%              | $11,280    |
-| State    | 0.00%             | 0.00%              | $0         |
-| Local    | 0.00%             | 0.00%              | $0         |
-| **Total**|                   | 14.89%             | $21,957    |
+| Field | Value |
+|-------|------:|
+| Total Income | $147,450 |
+| Standard Deduction | $29,200 |
+| Adjusted Gross Income | $147,450 |
+| Taxable Income | $118,250 |
+| **Regular Taxes** | **$16,121** |
 
 ## Final Answer
 
-The Federal income tax is **$10,677**.
+The Federal income tax (Regular Taxes) is **$16,121**.
 
 ## Calculation Explanation
 
-Using 2025 tax rules:
-1. Gross Income: $147,450
-2. Less 401(k): $147,450 - $23,000 = $124,450 (AGI)
-3. Less Standard Deduction (2025 MFJ): $124,450 - $30,000 = $94,450 (Taxable Income)
-4. Federal Tax:
-   - 10% on first $23,850 = $2,385
-   - 12% on ($94,450 - $23,850) = $8,472
-   - Total ≈ $10,857 (calculator may use slightly different brackets)
-
-The calculator shows $10,677, which accounts for precise 2025 tax bracket boundaries.
+Using 2024 tax rules for Married Filing Jointly:
+1. Total Income: $147,450
+2. Standard Deduction (2024 MFJ): $29,200
+3. Taxable Income: $147,450 - $29,200 = $118,250
+4. Federal Tax (2024 brackets):
+   - 10% on first $23,200 = $2,320
+   - 12% on ($94,300 - $23,200) = $8,532
+   - 22% on ($118,250 - $94,300) = $5,269
+   - Total = $16,121
