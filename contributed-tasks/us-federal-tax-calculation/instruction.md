@@ -43,7 +43,7 @@ Calculate the federal income tax for a married couple using the PriorTax 2024 ta
 Submit only the Federal income tax amount (Regular Taxes):
 
 ```
-<answer>$XXXXX</answer>
+<answer>$[amount]</answer>
 ```
 
-Include the dollar sign and round to the nearest dollar.
+Include the dollar sign and round to the nearest dollar (e.g., `<answer>$12,345</answer>`).
