@@ -8,7 +8,7 @@ import json
 import re
 
 # Ground truth value - Federal income tax (Regular Taxes) from PriorTax 2024 calculator
-EXPECTED_ANSWER = 16121
+EXPECTED_ANSWER = 19693
 TOLERANCE = 50  # Allow small tolerance for rounding differences
 
 
@@ -94,7 +94,7 @@ def test(result: dict) -> dict:
     if not output_answer:
         return {
             "passed": False,
-            "feedback": "No valid answer found in assistant responses. Expected format: <answer>$16121</answer>",
+            "feedback": "No valid answer found in assistant responses. Expected format: <answer>$19693</answer>",
             "details": {
                 "task_completed": task_completed,
                 "conversation_length": len(conversation),

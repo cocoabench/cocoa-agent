@@ -1,42 +1,44 @@
-Calculate the federal income tax for a married couple using the PriorTax 2024 tax calculator.
+Calculate the federal income tax for a married couple with multiple income sources using the PriorTax 2024 tax calculator.
 
 **Website:** https://priortax.com/tax-calculator/2024/
 
 **Taxpayer Information:**
 
 - Filing Status: Married Filing Jointly
-- Your Age (on Dec 31, 2024): 35
-- Spouse Age (on Dec 31, 2024): 35
+- Your Age (on Dec 31, 2024): 42
+- Spouse Age (on Dec 31, 2024): 39
 - Valid SSN: Yes (both)
 - Being claimed as dependent: No (both)
 - Legally blind: No (both)
 - Disabled: No (both)
-- Number of dependents: 0
+- Number of dependents: 2
 
 **Income:**
 
-- Your W-2 Wages: $85,000
-- Spouse W-2 Wages: $62,450
-- **Total Household Income: $147,450**
+- Your W-2 Wages: $95,000
+- Spouse W-2 Wages: $72,000
+- Qualified Dividends: $2,800
+- Long-term Capital Gains: $5,200
+
+**Deductions & Expenses:**
+
+- Mortgage Interest Paid: $18,000
+- Real Estate Taxes Paid: $8,500
+- Charitable Cash Donations: $6,000
+
+**Retirement:**
+
+- Traditional IRA Contribution (You): $6,500
+
+**Education:**
+
+- Student Loan Interest Paid: $2,500
 
 **Task:**
 
-1. Navigate to the PriorTax 2024 tax calculator
-2. On the **Personal** tab:
-   - Select "Married Filing Jointly"
-   - Enter your age: 35
-   - Answer Yes for Valid SSN, No for all other questions
-   - Enter 0 dependents
-   - Enter spouse age: 35
-   - Answer Yes for spouse Valid SSN, No for all other spouse questions
-   - Click Continue
-3. On the **Job** tab:
-   - Enter your W-2 wages: $85,000
-   - Enter spouse W-2 wages: $62,450
-   - Click Continue
-4. On remaining tabs (Investments, Business, Other, Household, Expenses, Donations, Education, Retirement, Payments):
-   - Keep defaults, click Continue
-5. Find the calculated **Regular Taxes** (Federal income tax) amount
+Navigate to the PriorTax 2024 tax calculator and enter all the information above across the relevant tabs (Personal, Job, Investments, Expenses, Donations, Retirement, Education). Then find the calculated **Regular Taxes** (Federal income tax) amount.
+
+**Note:** You will need to determine whether to use standard deduction or itemized deductions based on which gives a lower tax liability.
 
 **Output Format:**
 
