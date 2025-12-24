@@ -46,9 +46,13 @@ def _extract_answer_from_conversation(conversation: list) -> str | None:
                         args = json.loads(args_str) if isinstance(args_str, str) else args_str
                         if "result" in args:
                             result_str = args["result"]
+                            # First try to extract from <answer> tags
                             answer = _extract_answer_from_text(result_str)
                             if answer:
                                 return answer
+                            # If no tags found, return the raw result (may be JSON directly)
+                            if result_str and result_str.strip():
+                                return result_str.strip()
                     except (json.JSONDecodeError, Exception):
                         pass
 
