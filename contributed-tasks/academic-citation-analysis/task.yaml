@@ -1,0 +1,45 @@
+instruction: |-
+  Analyze the relationship between two recent Theory of Mind (ToM) research papers using their arXiv pages and PDFs.
+
+  **Paper 1 (AutoToM):**
+  - Title: "AutoToM: Scaling Model-based Mental Inference via Automated Agent Modeling"
+  - ArXiv: https://arxiv.org/abs/2502.15676
+
+  **Paper 2 (RepBelief):**
+  - Title: "Language Models Represent Beliefs of Self and Others"
+  - ArXiv: https://arxiv.org/abs/2402.18496
+
+  **Task:**
+
+  Analyze these two papers and answer the following questions:
+
+  1. **Common Author**: Is there an author who appears on BOTH papers? If yes, what is their full name?
+
+  2. **Citation Relationship**: Does Paper 1 (AutoToM) cite Paper 2 (RepBelief) in its references section? Answer "yes" or "no".
+
+  3. **Common References**: How many papers are cited by BOTH Paper 1 and Paper 2? (Count papers that appear in the reference lists of both papers)
+
+  4. **Recent References**: How many references in Paper 1 (AutoToM) are from the year 2023 or later (including 2023, 2024, 2025)?
+
+  **Important Notes:**
+  - Use only information from the papers' author lists and reference sections (which are stable over time)
+  - Do NOT use citation counts or "cited by" information (which changes over time)
+  - For common references, match by first author's last name and year
+  - A reference counts as "2023 or later" if the publication year is 2023, 2024, or 2025
+
+  **Output Format:**
+
+  Submit your answer in the following JSON format:
+
+  ```
+  <answer>
+  {
+    "common_author": "FirstName LastName",
+    "autotom_cites_repbelief": "no",
+    "common_references_count": 7,
+    "autotom_refs_2023_plus": 26
+  }
+  </answer>
+  ```
+
+  If there is no common author, use `"common_author": null`.
