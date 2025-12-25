@@ -1,0 +1,44 @@
+instruction: |-
+  Analyze the license compliance of npm package **@angular/cli@17.0.0**.
+
+  The Angular CLI is licensed under MIT. You need to verify that all its dependencies have compatible licenses.
+
+  **Tasks:**
+
+  1. Install @angular/cli@17.0.0 and analyze its complete dependency tree.
+  2. Identify all unique packages and their licenses.
+  3. Research any unfamiliar licenses to understand their terms.
+  4. Determine license compatibility.
+
+  **Answer the following questions:**
+
+  1. How many unique packages are in the dependency tree (including the root package)?
+  2. How many different license types are used across all packages?
+  3. List all packages that use the "BlueOak-1.0.0" license (package names only, without version numbers).
+  4. Which package uses the "CC-BY-3.0" license? (package name only, without version number)
+  5. Is "BlueOak-1.0.0" a permissive or copyleft license? You may need to search online to find out.
+  6. Are all dependencies compatible with the MIT license? (Answer: "yes" or "no")
+  7. Which license in this dependency tree requires attribution when redistributing?
+
+  **Output Format:**
+
+  Submit your answer in the following JSON format:
+
+  ```
+  <answer>
+  {
+    "total_packages": 230,
+    "license_types_count": 10,
+    "blueoak_packages": ["package1", "package2", "package3"],
+    "cc_by_package": "package-name",
+    "blueoak_type": "permissive",
+    "mit_compatible": "yes",
+    "attribution_license": "CC-BY-3.0"
+  }
+  </answer>
+  ```
+
+  **Notes:**
+  - Use tools like `npm ls`, `npx license-checker`, or similar to analyze dependencies.
+  - For unfamiliar licenses, search online to understand their terms and compatibility.
+  - Package names should not include version numbers (e.g., use "lodash" not "lodash@4.17.21").
