@@ -176,17 +176,14 @@ def get_next_task_number(tasks_dir: Path) -> int:
 
 def create_instruction_md(task_data: Dict) -> str:
     """Generate instruction.md content."""
-    content = task_data['description']
+    # Always start with **Task:** header to pass validation
+    content = "**Task:**\n\n" + task_data['description']
     
     # Only add requirements if there are any
     if task_data.get('requirements'):
         content += "\n\n**Requirements:**\n"
         for req in task_data['requirements']:
             content += f"- {req}\n"
-    
-    # Only add task detail if there is one
-    if task_data.get('task_detail'):
-        content += f"\n**Task:**\n\n{task_data['task_detail']}\n"
     
     content += f"""
     
