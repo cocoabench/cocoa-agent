@@ -257,11 +257,12 @@ def run_wizard():
 
 {Colors.BOLD}What makes a good task?{Colors.END}
 {Colors.GREEN}✓{Colors.END} Multi-step tasks requiring various skills
-{Colors.GREEN}✓{Colors.END} Clear, verifiable answers that can be evaluated automatically
+{Colors.GREEN}✓{Colors.END} Clear answers with unique format (evaluated via exact match)
 {Colors.GREEN}✓{Colors.END} Realistic challenges based on real-world problems
 {Colors.GREEN}✓{Colors.END} Tasks that test web browsing, visual perception, coding, or reasoning
 
 {Colors.BOLD}What to avoid:{Colors.END}
+{Colors.RED}✗{Colors.END} Answers with multiple valid representations (e.g., "1000" vs "1,000")
 {Colors.RED}✗{Colors.END} Tasks with subjective or opinion-based answers
 {Colors.RED}✗{Colors.END} Time-sensitive data that will become stale
 {Colors.RED}✗{Colors.END} Trivial single-step tasks
@@ -334,20 +335,24 @@ Example:
     print(f"""
 {Colors.CYAN}What is the correct answer? This is used for automatic evaluation.{Colors.END}
 
+{Colors.YELLOW} Exact Match:{Colors.END} Answers are evaluated using exact string match.
+Make sure your answer has ONE unique representation (specify format in instruction).
+
 Examples:
   • "42"
   • "Paris, France"  
   • "John Smith, 1985"
 """)
     
-    task_data['expected_answer'] = get_input("Expected answer")
+    task_data['expected_answer'] = get_input("Expected answer (exact string to match)")
     task_data['final_answer'] = task_data['expected_answer']
     
     # Answer format
     print(f"""
-{Colors.CYAN}How should the agent format their answer?{Colors.END}
+{Colors.CYAN}Describe the format so the agent produces the exact answer above if correct.{Colors.END}
+{Colors.YELLOW}Tip: Be as specific as possible (e.g., "integer without commas", "YYYY-MM-DD", "2 decimal places"){Colors.END}
 """)
-    format_example = get_input("Answer format example (e.g., 'city name', 'number')", "your_answer")
+    format_example = get_input("Answer format description", "your_answer")
     task_data['answer_format'] = format_example
     
     # Simplified - no separate requirements/task_detail needed
