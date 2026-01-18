@@ -363,18 +363,30 @@ def get_browser_tools() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "dom_click",
-                "description": "Click a DOM element using a CSS selector (text-based, no coordinates).",
+                "name": "dom_mark_elements",
+                "description": "Mark all interactive elements on the page with unique BIDs (Browser IDentifiers) and return a list of all marked elements with their attributes. This provides a structured view of what elements can be interacted with. Use this before DOM operations to see what elements are available.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "selector": {
-                            "type": "string",
-                            "description": "CSS selector to identify element(s) to click"
-                        },
-                        "nth": {
+                        "max_elements": {
                             "type": "integer",
-                            "description": "Zero-based index of the matched element to click (default 0)"
+                            "description": "Maximum number of elements to mark and return (default 100)"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_click",
+                "description": "Click an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements. This uses direct element references for reliable interaction.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to click (e.g., 'bid1', 'bid2')"
                         },
                         "button": {
                             "type": "string",
@@ -388,10 +400,114 @@ def get_browser_tools() -> List[Dict[str, Any]]:
                         },
                         "timeout_ms": {
                             "type": "integer",
-                            "description": "Timeout in milliseconds for the click (default 2000)"
+                            "description": "Timeout in milliseconds (default 2000)"
                         }
                     },
-                    "required": ["selector"]
+                    "required": ["bid"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_hover",
+                "description": "Hover over an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to hover over (e.g., 'bid1', 'bid2')"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_type",
+                "description": "Type text into an element by its BID (Browser IDentifier). The BID must be obtained first using dom_mark_elements. Useful for filling input fields.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "BID of the element to type into (e.g., 'bid1', 'bid2')"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type into the element"
+                        },
+                        "clear_first": {
+                            "type": "boolean",
+                            "description": "Whether to clear the element's value before typing (default true)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["bid", "text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_press",
+                "description": "Press a key on an element by its BID (Browser IDentifier) or on the page. The BID must be obtained first using dom_mark_elements. Useful for submitting forms, navigating, etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "Key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown')"
+                        },
+                        "bid": {
+                            "type": "string",
+                            "description": "Optional BID of the element to press key on. If not provided, key is pressed on the page."
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    },
+                    "required": ["key"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "dom_scroll",
+                "description": "Scroll an element by its BID (Browser IDentifier) or scroll the page. The BID must be obtained first using dom_mark_elements. Returns scroll position information including whether at top/bottom/left/right.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bid": {
+                            "type": "string",
+                            "description": "Optional BID of the element to scroll. If not provided, scrolls the page."
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["up", "down", "left", "right"],
+                            "description": "Direction to scroll (default 'down')"
+                        },
+                        "amount": {
+                            "type": "integer",
+                            "description": "Amount to scroll in pixels (default 500)"
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Timeout in milliseconds (default 2000)"
+                        }
+                    }
                 }
             }
         },
@@ -788,7 +904,12 @@ def map_tool_call_to_action(tool_name: str, arguments: Dict[str, Any]) -> Dict[s
         "dom_get_html": set(),
         "dom_query_selector": {"selector", "limit"},
         "dom_extract_links": {"filter_pattern", "limit"},
-        "dom_click": {"selector", "nth", "button", "click_count", "timeout_ms"},
+        "dom_mark_elements": {"max_elements"},
+        "dom_click": {"bid", "button", "click_count", "timeout_ms"},
+        "dom_hover": {"bid", "timeout_ms"},
+        "dom_type": {"bid", "text", "clear_first", "timeout_ms"},
+        "dom_press": {"key", "bid", "timeout_ms"},
+        "dom_scroll": {"bid", "direction", "amount", "timeout_ms"},
         "file_read": {"path"},
         "file_write": {"path", "content"},
         "file_list": {"path"},

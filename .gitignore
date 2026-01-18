@@ -30,6 +30,7 @@ env/
 
 # uv cache and temporary files (but keep uv.lock for reproducible installs)
 .uv/
+uv.lock
 
 # IDEs
 .vscode/
@@ -43,11 +44,10 @@ env/
 temp.log
 results/*
 outputs/*
+gpt-outputs/*
 trash/*
 
 tasks/*
-!tasks/task-example-1/
-unified-*
 
 configs/*
 !configs/default_human.json

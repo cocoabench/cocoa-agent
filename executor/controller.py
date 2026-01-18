@@ -105,11 +105,22 @@ Task:
 
 
 #### DOM Actions (Selector-based, no vision required)
+
+**Observation Actions:**
 - `dom_get_text()`: Get page text (innerText of body, truncated if long)
 - `dom_get_html()`: Get page HTML (truncated if long)
 - `dom_query_selector(selector, limit?)`: List elements with detailed attributes (tag, id, class, name, type, href, aria-label, role, text). Use to identify precise selectors before clicking.
 - `dom_extract_links(filter_pattern?, limit?)`: Extract links (text + href) optionally filtered by substring
-- `dom_click(selector, nth?, button?, click_count?, timeout_ms?)`: Click an element matched by CSS selector (0-based index)
+- `dom_mark_elements(max_elements?)`: **[REQUIRED FIRST STEP]** Mark all interactive elements with unique BIDs and return structured list. Use this FIRST to get a comprehensive view of clickable/interactive elements with their attributes. Then use the BIDs with interaction actions below.
+
+**DOM Interaction Actions (Use BIDs from dom_mark_elements):**
+- `dom_click(bid, button?, click_count?, timeout_ms?)`: Click an element by its BID (obtained from dom_mark_elements)
+- `dom_hover(bid, timeout_ms?)`: Hover over an element by its BID
+- `dom_type(bid, text, clear_first?, timeout_ms?)`: Type text into an element by its BID
+- `dom_press(key, bid?, timeout_ms?)`: Press a key on an element by its BID (or on the page if bid not provided)
+- `dom_scroll(bid?, direction?, amount?, timeout_ms?)`: Scroll an element by its BID (or scroll the page if bid not provided). Returns scroll position info including whether at top/bottom/left/right.
+
+**Note**: Always use `dom_mark_elements` first to get BIDs, then use DOM interaction actions. These are more reliable than on-screen actions and don't require visual verification.
 
 ### File Tools
 - `file_read(path)`: Read file content
@@ -141,13 +152,42 @@ Task:
 ### Browser Tools Guidelines
 
 #### (a) Interaction Mode Selection
-- **PRIORITY: Prefer DOM operations for web browsing**
-  - Use `dom_get_text/html`, `dom_query_selector`, `dom_extract_links`, `dom_click` when you can identify targets by selector/text
-  - DOM operations are more reliable and don't require visual verification
-  - Use on-screen actions only when:
-    - DOM is insufficient or ambiguous
-    - Target elements are not accessible via selectors (e.g., canvas, video controls, custom widgets)
+- **CRITICAL: ALWAYS prefer DOM operations over on-screen actions**
+  - **First step**: Use `dom_mark_elements()` to get a list of all interactive elements with their BIDs
+  - **Then use**: `dom_click(bid)`, `dom_type(bid, text)`, `dom_hover(bid)`, `dom_press(bid, key)`, `dom_scroll(bid, direction)` with the BIDs from `dom_mark_elements`
+  - DOM operations are more reliable, faster, and don't require visual verification
+  - **CRITICAL: BIDs are DYNAMIC and TEMPORARY**
+    - BIDs are reassigned every time you run `dom_mark_elements()`
+    - **NEVER reuse old BIDs** from previous `dom_mark_elements()` calls
+    - If a click fails with "No element found with BID", the BID is stale - you MUST run `dom_mark_elements()` again to get fresh BIDs
+    - After any page change (navigation, modal open/close, element state change), run `dom_mark_elements()` again
+    - **DO NOT repeatedly click the same stale BID** - if it fails once, refresh BIDs immediately
+  - **Only use on-screen actions** when:
+    - DOM operations fail after multiple attempts
+    - Target elements are not accessible via DOM (e.g., canvas, video controls, custom widgets)
     - You need to interact with non-DOM elements (tabs, browser back/forward buttons)
+
+#### (a2) Handling Modals, Popups, and Close Buttons
+- **When encountering popups/modals/dialogs:**
+  1. **Always run `dom_mark_elements` immediately** to identify interactive elements in the modal
+  2. **Look for close/dismiss buttons** - marked elements will include:
+     - Elements with `aria-label` containing "close", "dismiss", "cancel"
+     - Elements with `class` containing "close", "dismiss", "cancel"
+     - Elements with text like "×", "✕", "X", "Close", "No thanks", "Dismiss"
+     - Elements with `data-dismiss` or `data-close` attributes
+     - SVG icons or small divs/spans with cursor:pointer
+  3. **If modal blocks your target action:**
+     - First close the modal using identified close button BID
+     - Then run `dom_mark_elements` again to refresh BIDs for the underlying page
+     - Continue with your original task
+  4. **If close button is not in marked elements:**
+     - The element marking may have missed it due to DOM structure
+     - Try `browser_press("Escape")` to dismiss modal
+     - If Escape fails, use `browser_screenshot` to locate close button visually
+     - As last resort, use on-screen click on the close button coordinates
+  5. **Common error patterns:**
+     - **Clicking wrong element**: If you try to click something but keep clicking Overview/Specifications/Add to Cart instead of close button, it means the close button BID is missing. Run `dom_mark_elements` again and look for BIDs with class/aria-label/text indicating close/dismiss.
+     - **Element removed after click**: If click feedback says "Element removed from DOM", this is GOOD - it means you successfully clicked a close/dismiss button that removed the modal.
 
 #### (b) On-Screen Action Verification Protocol
 **CRITICAL: Every on-screen action MUST be verified with screenshots**
@@ -189,6 +229,20 @@ Task:
 
 #### (c) Failure Modes and Recovery
 
+**DOM Operation Failures:**
+- **Common causes:**
+  - **Stale BID**: BID from previous `dom_mark_elements()` call is no longer valid (element was re-rendered, page changed, etc.)
+  - Element removed from DOM after previous action
+  - Element not yet loaded or visible
+- **Recovery strategies:**
+  - **If click/hover/type fails with "No element found with BID"**: 
+    - **IMMEDIATELY run `dom_mark_elements()` again** to get fresh BIDs
+    - **DO NOT retry the same stale BID** - it will never work
+    - Find the target element in the new BID list and use the new BID
+  - **If same BID fails > 1 time**: Stop retrying that BID, refresh BIDs immediately
+  - **After page state changes** (modal opens/closes, navigation, element updates): Always run `dom_mark_elements()` again
+  - **If element keeps disappearing**: The element may be dynamically recreated - use `dom_query_selector` to find it by attributes instead
+
 **On-Screen Action Failures:**
 - **Common causes:**
   - Mouse clicked wrong position (coordinates inaccurate)
@@ -200,12 +254,12 @@ Task:
   - If wrong page loaded: Use `browser_navigate(url)` to return to previous page
   - After 6 consecutive browser actions without verified progress:
     - Stop automated attempts
-    - Switch to DOM operations (e.g., use `dom_click` with selector instead of coordinates)
+    - Switch to DOM operations (e.g., use `dom_mark_elements` then `dom_click` with BID)
     - Or use `code_execute` to programmatically scrape/interact
     - Document attempts and request human input if needed
 
 **Non-DOM Elements:**
-- Some elements (tabs, browser back/forward, custom widgets) cannot be accessed via `dom_click`
+- Some elements (tabs, browser back/forward, custom widgets) cannot be accessed via DOM operations
 - These MUST use on-screen actions with careful coordinate verification
 
 **Error Pages (404, maintenance, blocked):**
@@ -249,7 +303,7 @@ Task:
        with open("/home/gem/file.pdf", "wb") as f:
            f.write(response.content)
        ```
-   - Or use `dom_click` if download link has a selector
+   - Or use `dom_mark_elements` then `dom_click` with BID if download link is available
 
 3. **Verify download:**
    - Use `file_list("/home/gem")` or `shell_execute("ls -lh /home/gem/file.pdf")` to verify file exists
@@ -281,14 +335,15 @@ Task:
 
 ## Critical Reminders
 
-1. **Always verify on-screen actions** with screenshots before and after
-2. **Prefer DOM operations** over coordinate-based clicks
-3. **Remember working directory** is `/home/gem/` for all file/code/shell operations
-4. **Download files programmatically** using `code_execute`, not blind clicks
-5. **Verify all file operations** (existence, size, content)
-6. **MUST call `task_complete`** when finished, with result if applicable
-7. **No fabrication** - never invent URLs, filenames, or data
-8. **Stop retrying** after 6 failed browser actions - switch strategy or request help
+1. **ALWAYS use DOM operations first**: Start with `dom_mark_elements()`, then use `dom_click(bid)`, `dom_type(bid, text)`, etc.
+2. **Only use on-screen actions** when DOM operations fail or are unavailable
+3. **Always verify on-screen actions** with screenshots before and after (if you must use them)
+4. **Remember working directory** is `/home/gem/` for all file/code/shell operations
+5. **Download files programmatically** using `code_execute`, not blind clicks
+6. **Verify all file operations** (existence, size, content)
+7. **MUST call `task_complete`** when finished, with result if applicable
+8. **No fabrication** - never invent URLs, filenames, or data
+9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
 """
 
 UNIFIED_FEEDBACK_PROMPT_TEMPLATE = """
@@ -351,11 +406,22 @@ Task:
 
 
 #### DOM Actions (Selector-based, no vision required)
+
+**Observation Actions:**
 - `dom_get_text()`: Get page text (innerText of body, truncated if long)
 - `dom_get_html()`: Get page HTML (truncated if long)
 - `dom_query_selector(selector, limit?)`: List elements with detailed attributes (tag, id, class, name, type, href, aria-label, role, text). Use to identify precise selectors before clicking.
 - `dom_extract_links(filter_pattern?, limit?)`: Extract links (text + href) optionally filtered by substring
-- `dom_click(selector, nth?, button?, click_count?, timeout_ms?)`: Click an element matched by CSS selector (0-based index)
+- `dom_mark_elements(max_elements?)`: **[REQUIRED FIRST STEP]** Mark all interactive elements with unique BIDs and return structured list. Use this FIRST to get a comprehensive view of clickable/interactive elements with their attributes. Then use the BIDs with interaction actions below.
+
+**DOM Interaction Actions (Use BIDs from dom_mark_elements):**
+- `dom_click(bid, button?, click_count?, timeout_ms?)`: Click an element by its BID (obtained from dom_mark_elements)
+- `dom_hover(bid, timeout_ms?)`: Hover over an element by its BID
+- `dom_type(bid, text, clear_first?, timeout_ms?)`: Type text into an element by its BID
+- `dom_press(key, bid?, timeout_ms?)`: Press a key on an element by its BID (or on the page if bid not provided)
+- `dom_scroll(bid?, direction?, amount?, timeout_ms?)`: Scroll an element by its BID (or scroll the page if bid not provided). Returns scroll position info including whether at top/bottom/left/right.
+
+**Note**: Always use `dom_mark_elements` first to get BIDs, then use DOM interaction actions. These are more reliable than on-screen actions and don't require visual verification.
 
 ### File Tools
 - `file_read(path)`: Read file content
@@ -387,13 +453,42 @@ Task:
 ### Browser Tools Guidelines
 
 #### (a) Interaction Mode Selection
-- **PRIORITY: Prefer DOM operations for web browsing**
-  - Use `dom_get_text/html`, `dom_query_selector`, `dom_extract_links`, `dom_click` when you can identify targets by selector/text
-  - DOM operations are more reliable and don't require visual verification
-  - Use on-screen actions only when:
-    - DOM is insufficient or ambiguous
-    - Target elements are not accessible via selectors (e.g., canvas, video controls, custom widgets)
+- **CRITICAL: ALWAYS prefer DOM operations over on-screen actions**
+  - **First step**: Use `dom_mark_elements()` to get a list of all interactive elements with their BIDs
+  - **Then use**: `dom_click(bid)`, `dom_type(bid, text)`, `dom_hover(bid)`, `dom_press(bid, key)`, `dom_scroll(bid, direction)` with the BIDs from `dom_mark_elements`
+  - DOM operations are more reliable, faster, and don't require visual verification
+  - **CRITICAL: BIDs are DYNAMIC and TEMPORARY**
+    - BIDs are reassigned every time you run `dom_mark_elements()`
+    - **NEVER reuse old BIDs** from previous `dom_mark_elements()` calls
+    - If a click fails with "No element found with BID", the BID is stale - you MUST run `dom_mark_elements()` again to get fresh BIDs
+    - After any page change (navigation, modal open/close, element state change), run `dom_mark_elements()` again
+    - **DO NOT repeatedly click the same stale BID** - if it fails once, refresh BIDs immediately
+  - **Only use on-screen actions** when:
+    - DOM operations fail after multiple attempts
+    - Target elements are not accessible via DOM (e.g., canvas, video controls, custom widgets)
     - You need to interact with non-DOM elements (tabs, browser back/forward buttons)
+
+#### (a2) Handling Modals, Popups, and Close Buttons
+- **When encountering popups/modals/dialogs:**
+  1. **Always run `dom_mark_elements` immediately** to identify interactive elements in the modal
+  2. **Look for close/dismiss buttons** - marked elements will include:
+     - Elements with `aria-label` containing "close", "dismiss", "cancel"
+     - Elements with `class` containing "close", "dismiss", "cancel"
+     - Elements with text like "×", "✕", "X", "Close", "No thanks", "Dismiss"
+     - Elements with `data-dismiss` or `data-close` attributes
+     - SVG icons or small divs/spans with cursor:pointer
+  3. **If modal blocks your target action:**
+     - First close the modal using identified close button BID
+     - Then run `dom_mark_elements` again to refresh BIDs for the underlying page
+     - Continue with your original task
+  4. **If close button is not in marked elements:**
+     - The element marking may have missed it due to DOM structure
+     - Try `browser_press("Escape")` to dismiss modal
+     - If Escape fails, use `browser_screenshot` to locate close button visually
+     - As last resort, use on-screen click on the close button coordinates
+  5. **Common error patterns:**
+     - **Clicking wrong element**: If you try to click something but keep clicking Overview/Specifications/Add to Cart instead of close button, it means the close button BID is missing. Run `dom_mark_elements` again and look for BIDs with class/aria-label/text indicating close/dismiss.
+     - **Element removed after click**: If click feedback says "Element removed from DOM", this is GOOD - it means you successfully clicked a close/dismiss button that removed the modal.
 
 #### (b) On-Screen Action Verification Protocol
 **CRITICAL: Every on-screen action MUST be verified with screenshots**
@@ -435,6 +530,20 @@ Task:
 
 #### (c) Failure Modes and Recovery
 
+**DOM Operation Failures:**
+- **Common causes:**
+  - **Stale BID**: BID from previous `dom_mark_elements()` call is no longer valid (element was re-rendered, page changed, etc.)
+  - Element removed from DOM after previous action
+  - Element not yet loaded or visible
+- **Recovery strategies:**
+  - **If click/hover/type fails with "No element found with BID"**: 
+    - **IMMEDIATELY run `dom_mark_elements()` again** to get fresh BIDs
+    - **DO NOT retry the same stale BID** - it will never work
+    - Find the target element in the new BID list and use the new BID
+  - **If same BID fails > 1 time**: Stop retrying that BID, refresh BIDs immediately
+  - **After page state changes** (modal opens/closes, navigation, element updates): Always run `dom_mark_elements()` again
+  - **If element keeps disappearing**: The element may be dynamically recreated - use `dom_query_selector` to find it by attributes instead
+
 **On-Screen Action Failures:**
 - **Common causes:**
   - Mouse clicked wrong position (coordinates inaccurate)
@@ -446,12 +555,12 @@ Task:
   - If wrong page loaded: Use `browser_navigate(url)` to return to previous page
   - After 6 consecutive browser actions without verified progress:
     - Stop automated attempts
-    - Switch to DOM operations (e.g., use `dom_click` with selector instead of coordinates)
+    - Switch to DOM operations (e.g., use `dom_mark_elements` then `dom_click` with BID)
     - Or use `code_execute` to programmatically scrape/interact
     - Document attempts and request human input if needed
 
 **Non-DOM Elements:**
-- Some elements (tabs, browser back/forward, custom widgets) cannot be accessed via `dom_click`
+- Some elements (tabs, browser back/forward, custom widgets) cannot be accessed via DOM operations
 - These MUST use on-screen actions with careful coordinate verification
 
 **Error Pages (404, maintenance, blocked):**
@@ -495,7 +604,7 @@ Task:
        with open("/home/gem/file.pdf", "wb") as f:
            f.write(response.content)
        ```
-   - Or use `dom_click` if download link has a selector
+   - Or use `dom_mark_elements` then `dom_click` with BID if download link is available
 
 3. **Verify download:**
    - Use `file_list("/home/gem")` or `shell_execute("ls -lh /home/gem/file.pdf")` to verify file exists
@@ -534,14 +643,15 @@ To call a tool, use this format:
 
 ## Critical Reminders
 
-1. **Always verify on-screen actions** with screenshots before and after
-2. **Prefer DOM operations** over coordinate-based clicks
-3. **Remember working directory** is `/home/gem/` for all file/code/shell operations
-4. **Download files programmatically** using `code_execute`, not blind clicks
-5. **Verify all file operations** (existence, size, content)
-6. **MUST call `task_complete`** when finished, with result if applicable
-7. **No fabrication** - never invent URLs, filenames, or data
-8. **Stop retrying** after 6 failed browser actions - switch strategy or request help
+1. **ALWAYS use DOM operations first**: Start with `dom_mark_elements()`, then use `dom_click(bid)`, `dom_type(bid, text)`, etc.
+2. **Only use on-screen actions** when DOM operations fail or are unavailable
+3. **Always verify on-screen actions** with screenshots before and after (if you must use them)
+4. **Remember working directory** is `/home/gem/` for all file/code/shell operations
+5. **Download files programmatically** using `code_execute`, not blind clicks
+6. **Verify all file operations** (existence, size, content)
+7. **MUST call `task_complete`** when finished, with result if applicable
+8. **No fabrication** - never invent URLs, filenames, or data
+9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
 
 ## Summary
 Act visually, verify rigorously, and avoid blind exploration. Prefer one extra screenshot + VLM judgement before any ambiguous click.

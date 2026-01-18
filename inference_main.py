@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from executor import TaskExecutor
+from agents import BaseAgent, CocoaAgent, OpenAIDeepResearchAgent, GeminiDeepResearchAgent
 from executor.utils import setup_logging, load_config, get_logger
 from decrypt import decrypt_file_to_memory, read_canary
 
@@ -134,19 +134,31 @@ def main():
     use_encrypted = config.get("use_encrypted_tasks", False)
     logger.info(f"Use encrypted tasks: {use_encrypted}")
 
-    executor = TaskExecutor(config)
+    # Select agent based on configuration
+    agent_type = config.get("agent_type", "cocoa")
+    logger.info(f"Using agent type: {agent_type}")
+    
+    if agent_type == "openai_deep_research":
+        agent = OpenAIDeepResearchAgent(config)
+    elif agent_type == "gemini_deep_research":
+        agent = GeminiDeepResearchAgent(config)
+    elif agent_type == "cocoa":
+        agent = CocoaAgent(config)
+    else:
+        raise ValueError(f"Unknown agent type: {agent_type}")
+
     tasks = load_tasks(args.tasks_dir, use_encrypted=use_encrypted)
 
     for i, task in enumerate(tasks, 1):
         task_name = task.get("task_name", f"task_{i}")
         logger.info(f"Processing task {i}/{len(tasks)}: {task_name}")
 
-        executor.setup_environment(task)
+        agent.setup_environment(task)
         try:
-            result = executor.run_task(task)
+            result = agent.run_task(task)
 
             # Run test if available
-            test_result = executor.run_eval(task, result)
+            test_result = agent.run_eval(task, result)
             if test_result is not None:
                 result["eval"] = test_result
 
@@ -156,7 +168,7 @@ def main():
                 json.dump(result, f, indent=2)
             logger.debug(f"Task {task_name} result saved to {output_file}")
         finally:
-            executor.cleanup_environment()
+            agent.cleanup_environment()
 
     logger.info(f"Processed {len(tasks)} tasks. Results saved to {args.output_dir}")
 

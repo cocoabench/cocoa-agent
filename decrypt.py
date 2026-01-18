@@ -133,6 +133,9 @@ def decrypt_file_to_disk(enc_path: Path, canary: str) -> bool:
     original_path = enc_path.parent / enc_path.stem
     original_path.write_text(decrypted, encoding='utf-8')
     
+    # Delete the encrypted file after successful decryption
+    enc_path.unlink()
+    
     return True
 
 

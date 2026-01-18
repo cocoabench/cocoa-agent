@@ -18,4 +18,4 @@ instruction: |-
   - Dates should be in YYYY-MM-DD format
   - A tolerance of ±7 days is acceptable when evaluating breakpoint correctness
 
-  The data file is located at /home/gem/assets/series.csv. It contains columns: date, t, y.
+  You should download the data file using wget from the following URL: https://raw.githubusercontent.com/benchworld/asset/main/series_bGluZWFyLXJlZ2ltZS1lc3RpbWF0aW9uLTI.csv. It contains columns: date, t, y.

@@ -592,40 +592,700 @@ class BrowserSandboxClient(SandboxClient):
             logger.error(f"Failed to extract links: {e}")
             return f"Failed to extract links: {str(e)}"
 
-    def _dom_click(
-        self,
-        selector: str,
-        nth: int = 0,
-        button: str = "left",
-        click_count: int = 1,
-        timeout_ms: int = 2000,
-    ) -> str:
-        """Click a DOM element using a CSS selector (and optional index)."""
+    # Temporarily commented out selector-based DOM operations - using BID-based operations instead
+    # def _dom_click(
+    #     self,
+    #     selector: str,
+    #     nth: int = 0,
+    #     button: str = "left",
+    #     click_count: int = 1,
+    #     timeout_ms: int = 2000,
+    # ) -> str:
+    #     """Click a DOM element using a CSS selector (and optional index)."""
+    #     try:
+    #         async def op(page):
+    #             elements = await page.query_selector_all(selector)
+    #             if not elements:
+    #                 return f"No element found for selector '{selector}'"
+    #             idx = min(max(nth, 0), len(elements) - 1)
+    #             target = elements[idx]
+    #             await target.scroll_into_view_if_needed(timeout=timeout_ms)
+    #             await target.click(
+    #                 button=button,
+    #                 click_count=click_count,
+    #                 timeout=timeout_ms,
+    #                 force=True,
+    #             )
+    #             try:
+    #                 text = await target.inner_text()
+    #                 text = text.strip().replace("\n", " ")
+    #             except Exception:
+    #                 text = ""
+    #             return f"Clicked element {idx+1}/{len(elements)} matching '{selector}' (button={button}, clicks={click_count}). Text: {text[:120]}"
+
+    #         return self._with_page(lambda page: op(page), wait_timeout=5000)
+    #     except Exception as e:
+    #         logger.error(f"Failed to click selector: {e}")
+    #         return f"Failed to click selector: {str(e)}"
+
+    # def _dom_hover(
+    #     self,
+    #     selector: str,
+    #     nth: int = 0,
+    #     timeout_ms: int = 2000,
+    # ) -> str:
+    #     """Hover over a DOM element using a CSS selector (and optional index)."""
+    #     try:
+    #         async def op(page):
+    #             elements = await page.query_selector_all(selector)
+    #             if not elements:
+    #                 return f"No element found for selector '{selector}'"
+    #             idx = min(max(nth, 0), len(elements) - 1)
+    #             target = elements[idx]
+    #             await target.scroll_into_view_if_needed(timeout=timeout_ms)
+    #             await target.hover(timeout=timeout_ms)
+    #             try:
+    #                 text = await target.inner_text()
+    #                 text = text.strip().replace("\n", " ")
+    #             except Exception:
+    #                 text = ""
+    #             return f"Hovered over element {idx+1}/{len(elements)} matching '{selector}'. Text: {text[:120]}"
+
+    #         return self._with_page(lambda page: op(page), wait_timeout=5000)
+    #     except Exception as e:
+    #         logger.error(f"Failed to hover over selector: {e}")
+    #         return f"Failed to hover over selector: {str(e)}"
+
+    # def _dom_type(
+    #     self,
+    #     selector: str,
+    #     text: str,
+    #     nth: int = 0,
+    #     clear_first: bool = True,
+    #     timeout_ms: int = 2000,
+    # ) -> str:
+    #     """Type text into a DOM element using a CSS selector (and optional index)."""
+    #     try:
+    #         async def op(page):
+    #             elements = await page.query_selector_all(selector)
+    #             if not elements:
+    #                 return f"No element found for selector '{selector}'"
+    #             idx = min(max(nth, 0), len(elements) - 1)
+    #             target = elements[idx]
+    #             await target.scroll_into_view_if_needed(timeout=timeout_ms)
+    #             
+    #             if clear_first:
+    #                 await target.fill("", timeout=timeout_ms)
+    #             
+    #             await target.type(text, timeout=timeout_ms)
+    #             
+    #             try:
+    #                 final_value = await target.input_value()
+    #             except Exception:
+    #                 final_value = text
+    #             
+    #             return f"Typed into element {idx+1}/{len(elements)} matching '{selector}'. Final value: {final_value[:120]}"
+
+    #         return self._with_page(lambda page: op(page), wait_timeout=5000)
+    #     except Exception as e:
+    #         logger.error(f"Failed to type into selector: {e}")
+    #         return f"Failed to type into selector: {str(e)}"
+
+    # def _dom_press(
+    #     self,
+    #     key: str,
+    #     selector: str | None = None,
+    #     nth: int = 0,
+    #     timeout_ms: int = 2000,
+    # ) -> str:
+    #     """Press a key on the page or on a specific element."""
+    #     try:
+    #         async def op(page):
+    #             if selector:
+    #                 elements = await page.query_selector_all(selector)
+    #                 if not elements:
+    #                     return f"No element found for selector '{selector}'"
+    #                 idx = min(max(nth, 0), len(elements) - 1)
+    #                 target = elements[idx]
+    #                 await target.scroll_into_view_if_needed(timeout=timeout_ms)
+    #                 await target.press(key, timeout=timeout_ms)
+    #                 return f"Pressed key '{key}' on element {idx+1}/{len(elements)} matching '{selector}'"
+    #             else:
+    #                 await page.keyboard.press(key)
+    #                 return f"Pressed key '{key}' on page"
+
+    #         return self._with_page(lambda page: op(page), wait_timeout=5000)
+    #     except Exception as e:
+    #         logger.error(f"Failed to press key: {e}")
+    #         return f"Failed to press key: {str(e)}"
+
+    # def _dom_scroll(
+    #     self,
+    #     direction: str = "down",
+    #     amount: int = 500,
+    #     selector: str | None = None,
+    #     nth: int = 0,
+    #     timeout_ms: int = 2000,
+    # ) -> str:
+    #     """Scroll the page or a specific element."""
+    #     try:
+    #         async def op(page):
+    #             if selector:
+    #                 elements = await page.query_selector_all(selector)
+    #                 if not elements:
+    #                     return f"No element found for selector '{selector}'"
+    #                 idx = min(max(nth, 0), len(elements) - 1)
+    #                 target = elements[idx]
+    #                 
+    #                 if direction == "down":
+    #                     await target.evaluate(f"el => el.scrollTop += {amount}")
+    #                 elif direction == "up":
+    #                     await target.evaluate(f"el => el.scrollTop -= {amount}")
+    #                 elif direction == "left":
+    #                     await target.evaluate(f"el => el.scrollLeft -= {amount}")
+    #                 elif direction == "right":
+    #                     await target.evaluate(f"el => el.scrollLeft += {amount}")
+    #                 
+    #                 return f"Scrolled {direction} by {amount}px on element {idx+1}/{len(elements)} matching '{selector}'"
+    #             else:
+    #                 if direction == "down":
+    #                     await page.evaluate(f"window.scrollBy(0, {amount})")
+    #                 elif direction == "up":
+    #                     await page.evaluate(f"window.scrollBy(0, -{amount})")
+    #                 elif direction == "left":
+    #                     await page.evaluate(f"window.scrollBy(-{amount}, 0)")
+    #                 elif direction == "right":
+    #                     await page.evaluate(f"window.scrollBy({amount}, 0)")
+    #                 
+    #                 return f"Scrolled page {direction} by {amount}px"
+
+    #         return self._with_page(lambda page: op(page), wait_timeout=5000)
+    #     except Exception as e:
+    #         logger.error(f"Failed to scroll: {e}")
+    #         return f"Failed to scroll: {str(e)}"
+
+    def _dom_mark_elements_and_extract(self, max_elements: int = 100) -> str:
+        """Mark interactive elements with unique BIDs and return structured list with context."""
         try:
             async def op(page):
-                elements = await page.query_selector_all(selector)
-                if not elements:
-                    return f"No element found for selector '{selector}'"
-                idx = min(max(nth, 0), len(elements) - 1)
-                target = elements[idx]
-                await target.scroll_into_view_if_needed(timeout=timeout_ms)
-                await target.click(
-                    button=button,
-                    click_count=click_count,
-                    timeout=timeout_ms,
-                    force=True,
-                )
+                # JavaScript to inject BIDs and extract interactive elements
+                js_code = """
+                () => {
+                    // Clear previous marks
+                    document.querySelectorAll('[data-cocoa-bid]').forEach(el => {
+                        el.removeAttribute('data-cocoa-bid');
+                    });
+                    
+                    // Interactive element selectors
+                    const interactiveSelectors = [
+                        'a[href]',
+                        'button',
+                        'input',
+                        'textarea',
+                        'select',
+                        '[role="button"]',
+                        '[role="link"]',
+                        '[role="tab"]',
+                        '[role="menuitem"]',
+                        '[role="dialog"]',
+                        '[role="checkbox"]',
+                        '[role="radio"]',
+                        '[role="switch"]',
+                        '[onclick]',
+                        '[contenteditable="true"]',
+                        '[class*="close"]',
+                        '[class*="dismiss"]',
+                        '[class*="cancel"]',
+                        '[aria-label*="close" i]',
+                        '[aria-label*="dismiss" i]',
+                        '[aria-label*="cancel" i]',
+                        '[title*="close" i]',
+                        '[title*="dismiss" i]',
+                        'svg[onclick]',
+                        '[data-dismiss]',
+                        '[data-close]'
+                    ];
+                    
+                    // Helper function to check if element is interactive
+                    function isInteractive(el) {
+                        const tag = el.tagName.toLowerCase();
+                        const hasClick = el.onclick || el.hasAttribute('onclick');
+                        const hasRole = ['button', 'link', 'tab', 'menuitem', 'checkbox', 'radio', 'switch'].includes(el.getAttribute('role'));
+                        const isClickable = el.style.cursor === 'pointer' || window.getComputedStyle(el).cursor === 'pointer';
+                        const hasCloseIndicator = (el.textContent || '').trim().match(/^[×✕✖✗xX]$/);
+                        
+                        return hasClick || hasRole || isClickable || hasCloseIndicator;
+                    }
+                    
+                    // Get all potentially interactive elements
+                    const directElements = Array.from(document.querySelectorAll(interactiveSelectors.join(',')));
+                    
+                    // Also check divs and spans with cursor:pointer or close indicators
+                    const allDivSpan = Array.from(document.querySelectorAll('div, span, i, svg'));
+                    const extraElements = allDivSpan.filter(el => {
+                        if (directElements.includes(el)) return false;
+                        return isInteractive(el);
+                    });
+                    
+                    const elements = [...directElements, ...extraElements];
+                    const results = [];
+                    let bid = 1;
+                    
+                    for (const el of elements) {
+                        // Check visibility
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        
+                        // More lenient visibility check
+                        if (style.display === 'none' || style.visibility === 'hidden') {
+                            continue;
+                        }
+                        
+                        // Allow small elements (close buttons can be small)
+                        if (rect.width === 0 && rect.height === 0) {
+                            continue;
+                        }
+                        
+                        // Check if element is actually rendered and not completely transparent
+                        if (style.opacity === '0') {
+                            continue;
+                        }
+                        
+                        // Skip if covered by another element (except for high z-index elements like modals)
+                        const zIndex = parseInt(style.zIndex) || 0;
+                        if (zIndex < 0) {
+                            continue;
+                        }
+                        
+                        // Assign BID
+                        const bidStr = `bid${bid}`;
+                        el.setAttribute('data-cocoa-bid', bidStr);
+                        
+                        // Extract element info
+                        const tag = el.tagName.toLowerCase();
+                        const text = (el.innerText || el.textContent || '').trim().substring(0, 150);
+                        const value = el.value || '';
+                        const placeholder = el.placeholder || '';
+                        const type = el.type || '';
+                        const href = el.href || '';
+                        const id = el.id || '';
+                        const classList = Array.from(el.classList || []).join(' ');
+                        const role = el.getAttribute('role') || '';
+                        const ariaLabel = el.getAttribute('aria-label') || '';
+                        const title = el.title || '';
+                        const name = el.name || '';
+                        const dataDismiss = el.getAttribute('data-dismiss') || '';
+                        const dataClose = el.getAttribute('data-close') || '';
+                        
+                        // Build readable description
+                        let description = `<${tag}>`;
+                        if (id) description += ` id="${id}"`;
+                        if (classList) description += ` class="${classList.substring(0, 80)}"`;
+                        if (type) description += ` type="${type}"`;
+                        if (role) description += ` role="${role}"`;
+                        if (ariaLabel) description += ` aria-label="${ariaLabel}"`;
+                        if (title) description += ` title="${title}"`;
+                        if (name) description += ` name="${name}"`;
+                        if (dataDismiss) description += ` data-dismiss="${dataDismiss}"`;
+                        if (dataClose) description += ` data-close="${dataClose}"`;
+                        if (text) description += ` text="${text}"`;
+                        if (value) description += ` value="${value}"`;
+                        if (placeholder) description += ` placeholder="${placeholder}"`;
+                        if (href) description += ` href="${href.substring(0, 80)}"`;
+                        
+                        results.push({
+                            bid: bidStr,
+                            description: description
+                        });
+                        
+                        bid++;
+                        if (bid > """ + str(max_elements) + """) break;
+                    }
+                    
+                    return results;
+                }
+                """
+                
+                elements_info = await page.evaluate(js_code)
+                
+                if not elements_info:
+                    return "No interactive elements found on page"
+                
+                # Format output
+                lines = [f"Found {len(elements_info)} interactive element(s):"]
+                for elem in elements_info:
+                    lines.append(f"[{elem['bid']}] {elem['description']}")
+                
+                return "\n".join(lines)
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to mark elements and extract: {e}")
+            return f"Failed to mark elements and extract: {str(e)}"
+
+    def _dom_click(self, bid: str, button: str = "left", click_count: int = 1, timeout_ms: int = 2000) -> str:
+        """Click a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"ERROR: No element found with BID '{bid}'. This BID is stale/invalid. DO NOT retry this BID. You MUST run dom_mark_elements() again to get fresh BIDs, then find your target element in the new list and use its new BID."
+                
+                # Get element info before clicking
+                tag_name = await element.evaluate('el => el.tagName.toLowerCase()')
+                element_visible = await element.is_visible()
+                element_enabled = await element.is_enabled()
+                
                 try:
-                    text = await target.inner_text()
+                    text_before = await element.inner_text()
+                    text_before = text_before.strip().replace("\n", " ")
+                except Exception:
+                    text_before = ""
+                
+                # Try multiple click strategies
+                click_success = False
+                error_msg = ""
+                
+                # Strategy 1: Standard click with scroll
+                try:
+                    await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                    await element.click(button=button, click_count=click_count, timeout=timeout_ms)
+                    click_success = True
+                except Exception as e1:
+                    error_msg = str(e1)
+                    
+                    # Strategy 2: Force click
+                    try:
+                        await element.click(button=button, click_count=click_count, timeout=timeout_ms, force=True)
+                        click_success = True
+                        error_msg = ""
+                    except Exception as e2:
+                        error_msg = str(e2)
+                        
+                        # Strategy 3: JS click for stubborn elements
+                        try:
+                            await element.evaluate('el => el.click()')
+                            click_success = True
+                            error_msg = ""
+                        except Exception as e3:
+                            error_msg = f"All click strategies failed. Last error: {str(e3)}"
+                
+                if not click_success:
+                    return f"Failed to click BID '{bid}' ({tag_name}). Element visible: {element_visible}, enabled: {element_enabled}. Error: {error_msg}"
+                
+                # Get element state after clicking (if still exists)
+                try:
+                    await page.wait_for_timeout(300)  # Short wait for UI update
+                    text_after = await element.inner_text()
+                    text_after = text_after.strip().replace("\n", " ")
+                    if text_after != text_before:
+                        return f"Clicked element with BID '{bid}' (button={button}, clicks={click_count}). Text changed: '{text_before[:60]}' -> '{text_after[:60]}'"
+                except Exception:
+                    # Element might be removed after click (e.g., close button)
+                    return f"Clicked element with BID '{bid}' (button={button}, clicks={click_count}). Element removed from DOM (likely a close/dismiss button or navigation)."
+                
+                return f"Clicked element with BID '{bid}' (button={button}, clicks={click_count}). Text: {text_before[:120]}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to click BID: {e}")
+            return f"Failed to click BID: {str(e)}"
+
+    def _dom_hover(self, bid: str, timeout_ms: int = 2000) -> str:
+        """Hover over a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"ERROR: No element found with BID '{bid}'. This BID is stale/invalid. DO NOT retry this BID. You MUST run dom_mark_elements() again to get fresh BIDs."
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                await element.hover(timeout=timeout_ms)
+                
+                try:
+                    text = await element.inner_text()
                     text = text.strip().replace("\n", " ")
                 except Exception:
                     text = ""
-                return f"Clicked element {idx+1}/{len(elements)} matching '{selector}' (button={button}, clicks={click_count}). Text: {text[:120]}"
-
+                
+                return f"Hovered over element with BID '{bid}'. Text: {text[:120]}"
+            
             return self._with_page(lambda page: op(page), wait_timeout=5000)
         except Exception as e:
-            logger.error(f"Failed to click selector: {e}")
-            return f"Failed to click selector: {str(e)}"
+            logger.error(f"Failed to hover BID: {e}")
+            return f"Failed to hover BID: {str(e)}"
+
+    def _dom_type(self, bid: str, text: str, clear_first: bool = True, timeout_ms: int = 2000) -> str:
+        """Type text into a DOM element using a BID."""
+        try:
+            async def op(page):
+                selector = f'[data-cocoa-bid="{bid}"]'
+                element = await page.query_selector(selector)
+                if not element:
+                    return f"ERROR: No element found with BID '{bid}'. This BID is stale/invalid. DO NOT retry this BID. You MUST run dom_mark_elements() again to get fresh BIDs."
+                
+                await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                
+                if clear_first:
+                    await element.fill("", timeout=timeout_ms)
+                
+                await element.type(text, timeout=timeout_ms)
+                
+                try:
+                    final_value = await element.input_value()
+                except Exception:
+                    final_value = text
+                
+                return f"Typed into element with BID '{bid}'. Final value: {final_value[:120]}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to type into BID: {e}")
+            return f"Failed to type into BID: {str(e)}"
+
+    def _dom_press(self, key: str, bid: str | None = None, timeout_ms: int = 2000) -> str:
+        """Press a key on a DOM element using a BID or on the page."""
+        try:
+            async def op(page):
+                if bid:
+                    selector = f'[data-cocoa-bid="{bid}"]'
+                    element = await page.query_selector(selector)
+                    if not element:
+                        return f"ERROR: No element found with BID '{bid}'. This BID is stale/invalid. DO NOT retry this BID. You MUST run dom_mark_elements() again to get fresh BIDs."
+                    
+                    await element.scroll_into_view_if_needed(timeout=timeout_ms)
+                    await element.press(key, timeout=timeout_ms)
+                    
+                    return f"Pressed key '{key}' on element with BID '{bid}'"
+                else:
+                    await page.keyboard.press(key)
+                    return f"Pressed key '{key}' on page"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to press key: {e}")
+            return f"Failed to press key: {str(e)}"
+
+    def _dom_scroll(self, bid: str | None = None, direction: str = "down", amount: int = 500, timeout_ms: int = 2000) -> str:
+        """Scroll a DOM element or the page using a BID."""
+        try:
+            async def op(page):
+                if bid:
+                    selector = f'[data-cocoa-bid="{bid}"]'
+                    element = await page.query_selector(selector)
+                    if not element:
+                        return f"ERROR: No element found with BID '{bid}'. This BID is stale/invalid. DO NOT retry this BID. You MUST run dom_mark_elements() again to get fresh BIDs."
+                    
+                    # Get scroll info before scrolling
+                    scroll_info_before = await element.evaluate("""
+                        el => ({
+                            scrollTop: el.scrollTop,
+                            scrollLeft: el.scrollLeft,
+                            scrollHeight: el.scrollHeight,
+                            scrollWidth: el.scrollWidth,
+                            clientHeight: el.clientHeight,
+                            clientWidth: el.clientWidth
+                        })
+                    """)
+                    
+                    if direction == "down":
+                        await element.evaluate(f"el => el.scrollTop += {amount}")
+                    elif direction == "up":
+                        await element.evaluate(f"el => el.scrollTop -= {amount}")
+                    elif direction == "left":
+                        await element.evaluate(f"el => el.scrollLeft -= {amount}")
+                    elif direction == "right":
+                        await element.evaluate(f"el => el.scrollLeft += {amount}")
+                    
+                    # Get scroll info after scrolling
+                    scroll_info_after = await element.evaluate("""
+                        el => ({
+                            scrollTop: el.scrollTop,
+                            scrollLeft: el.scrollLeft,
+                            scrollHeight: el.scrollHeight,
+                            scrollWidth: el.scrollWidth,
+                            clientHeight: el.clientHeight,
+                            clientWidth: el.clientWidth
+                        })
+                    """)
+                    
+                    # Calculate scroll position and limits
+                    if direction in ["up", "down"]:
+                        max_scroll = scroll_info_after["scrollHeight"] - scroll_info_after["clientHeight"]
+                        current = scroll_info_after["scrollTop"]
+                        at_top = current <= 0
+                        at_bottom = current >= max_scroll - 1
+                        position_info = f"Position: {current}/{max_scroll}"
+                        if at_top:
+                            position_info += " (at top)"
+                        elif at_bottom:
+                            position_info += " (at bottom)"
+                        else:
+                            percent = int((current / max_scroll) * 100) if max_scroll > 0 else 0
+                            position_info += f" ({percent}%)"
+                    else:
+                        max_scroll = scroll_info_after["scrollWidth"] - scroll_info_after["clientWidth"]
+                        current = scroll_info_after["scrollLeft"]
+                        at_left = current <= 0
+                        at_right = current >= max_scroll - 1
+                        position_info = f"Position: {current}/{max_scroll}"
+                        if at_left:
+                            position_info += " (at left)"
+                        elif at_right:
+                            position_info += " (at right)"
+                        else:
+                            percent = int((current / max_scroll) * 100) if max_scroll > 0 else 0
+                            position_info += f" ({percent}%)"
+                    
+                    return f"Scrolled {direction} by {amount}px on element with BID '{bid}'. {position_info}"
+                else:
+                    # Scroll the page - try multiple strategies for modern SPA pages
+                    scroll_info_before = await page.evaluate("""
+                        () => ({
+                            scrollY: window.scrollY,
+                            scrollX: window.scrollX,
+                            scrollHeight: document.documentElement.scrollHeight,
+                            scrollWidth: document.documentElement.scrollWidth,
+                            clientHeight: window.innerHeight,
+                            clientWidth: window.innerWidth
+                        })
+                    """)
+                    
+                    # Strategy 1: Try scrolling the main scrollable container if page itself isn't scrollable
+                    page_scrollable_x = scroll_info_before["scrollWidth"] > scroll_info_before["clientWidth"]
+                    page_scrollable_y = scroll_info_before["scrollHeight"] > scroll_info_before["clientHeight"]
+                    
+                    scroll_success = False
+                    scroll_target = "page"
+                    
+                    # If page isn't scrollable in target direction, try to find and scroll a container
+                    if (direction in ["left", "right"] and not page_scrollable_x) or \
+                       (direction in ["up", "down"] and not page_scrollable_y):
+                        # Find and scroll the largest scrollable container
+                        container_scrolled = await page.evaluate(f"""
+                            (direction, amount) => {{
+                                const allElements = document.querySelectorAll('*');
+                                let bestContainer = null;
+                                let bestSize = 0;
+                                
+                                for (const el of allElements) {{
+                                    if (el === document.body || el === document.documentElement) continue;
+                                    
+                                    const style = window.getComputedStyle(el);
+                                    const overflowX = style.overflowX;
+                                    const overflowY = style.overflowY;
+                                    
+                                    let isScrollable = false;
+                                    let scrollableSize = 0;
+                                    
+                                    if (direction === 'left' || direction === 'right') {{
+                                        isScrollable = (overflowX === 'auto' || overflowX === 'scroll') && 
+                                                      el.scrollWidth > el.clientWidth;
+                                        scrollableSize = el.scrollWidth - el.clientWidth;
+                                    }} else {{
+                                        isScrollable = (overflowY === 'auto' || overflowY === 'scroll') && 
+                                                      el.scrollHeight > el.clientHeight;
+                                        scrollableSize = el.scrollHeight - el.clientHeight;
+                                    }}
+                                    
+                                    if (isScrollable && scrollableSize > bestSize) {{
+                                        bestContainer = el;
+                                        bestSize = scrollableSize;
+                                    }}
+                                }}
+                                
+                                if (bestContainer) {{
+                                    if (direction === 'down') {{
+                                        bestContainer.scrollTop += amount;
+                                    }} else if (direction === 'up') {{
+                                        bestContainer.scrollTop -= amount;
+                                    }} else if (direction === 'left') {{
+                                        bestContainer.scrollLeft -= amount;
+                                    }} else if (direction === 'right') {{
+                                        bestContainer.scrollLeft += amount;
+                                    }}
+                                    return true;
+                                }}
+                                return false;
+                            }}
+                        """, direction, amount)
+                        
+                        if container_scrolled:
+                            scroll_success = True
+                            scroll_target = "container"
+                    
+                    # Strategy 2: Scroll the page/window (if not already scrolled via container)
+                    if not scroll_success:
+                        if direction == "down":
+                            await page.evaluate(f"window.scrollBy(0, {amount})")
+                        elif direction == "up":
+                            await page.evaluate(f"window.scrollBy(0, -{amount})")
+                        elif direction == "left":
+                            await page.evaluate(f"window.scrollBy(-{amount}, 0)")
+                        elif direction == "right":
+                            await page.evaluate(f"window.scrollBy({amount}, 0)")
+                    
+                    # Wait a bit for scroll to complete
+                    await page.wait_for_timeout(100)
+                    
+                    # Get scroll info after scrolling
+                    scroll_info_after = await page.evaluate("""
+                        () => ({
+                            scrollY: window.scrollY,
+                            scrollX: window.scrollX,
+                            scrollHeight: document.documentElement.scrollHeight,
+                            scrollWidth: document.documentElement.scrollWidth,
+                            clientHeight: window.innerHeight,
+                            clientWidth: window.innerWidth
+                        })
+                    """)
+                    
+                    # Calculate scroll position and limits
+                    if direction in ["up", "down"]:
+                        max_scroll = scroll_info_after["scrollHeight"] - scroll_info_after["clientHeight"]
+                        current = scroll_info_after["scrollY"]
+                        at_top = current <= 0
+                        at_bottom = current >= max_scroll - 1
+                        position_info = f"Position: {current}/{max_scroll}"
+                        if at_top:
+                            position_info += " (at top)"
+                        elif at_bottom:
+                            position_info += " (at bottom)"
+                        else:
+                            percent = int((current / max_scroll) * 100) if max_scroll > 0 else 0
+                            position_info += f" ({percent}%)"
+                    else:
+                        max_scroll = scroll_info_after["scrollWidth"] - scroll_info_after["clientWidth"]
+                        current = scroll_info_after["scrollX"]
+                        at_left = current <= 0
+                        at_right = current >= max_scroll - 1
+                        position_info = f"Position: {current}/{max_scroll}"
+                        if at_left:
+                            position_info += " (at left)"
+                        elif at_right:
+                            position_info += " (at right)"
+                        else:
+                            percent = int((current / max_scroll) * 100) if max_scroll > 0 else 0
+                            position_info += f" ({percent}%)"
+                    
+                    # Check if scroll actually happened
+                    scroll_changed = False
+                    if direction in ["up", "down"]:
+                        scroll_changed = abs(scroll_info_after["scrollY"] - scroll_info_before["scrollY"]) > 1
+                    else:
+                        scroll_changed = abs(scroll_info_after["scrollX"] - scroll_info_before["scrollX"]) > 1
+                    
+                    if not scroll_changed and max_scroll <= 0:
+                        return f"WARNING: Page is not scrollable in {direction} direction. Content fits within viewport (scrollWidth={scroll_info_after['scrollWidth']}, clientWidth={scroll_info_after['clientWidth']}). Try scrolling a specific element by providing its BID from dom_mark_elements()."
+                    
+                    return f"Scrolled page {direction} by {amount}px ({scroll_target}). {position_info}"
+            
+            return self._with_page(lambda page: op(page), wait_timeout=5000)
+        except Exception as e:
+            logger.error(f"Failed to scroll: {e}")
+            return f"Failed to scroll: {str(e)}"
 
     def _navigate_to_url(self, url: str) -> str:
         """Navigate browser to a URL via CDP + Playwright."""
@@ -719,19 +1379,159 @@ class BrowserSandboxClient(SandboxClient):
             self.execution_history.append({"action": action, "feedback": feedback})
             return feedback
 
+        # Temporarily commented out selector-based DOM action handlers - using BID-based operations instead
+        # if action.get("action_type") == "dom_click":
+        #     selector = action.get("selector")
+        #     if not selector:
+        #         feedback = {"done": False, "message": "selector is required for dom_click"}
+        #     else:
+        #         message = self._dom_click(
+        #             selector=selector,
+        #             nth=action.get("nth", 0),
+        #             button=action.get("button", "left"),
+        #             click_count=action.get("click_count", 1),
+        #             timeout_ms=action.get("timeout_ms", 2000),
+        #         )
+        #         feedback = {"done": False, "message": message}
+        #     self.execution_history.append({"action": action, "feedback": feedback})
+        #     return feedback
+
+        # if action.get("action_type") == "dom_hover":
+        #     selector = action.get("selector")
+        #     if not selector:
+        #         feedback = {"done": False, "message": "selector is required for dom_hover"}
+        #     else:
+        #         message = self._dom_hover(
+        #             selector=selector,
+        #             nth=action.get("nth", 0),
+        #             timeout_ms=action.get("timeout_ms", 2000),
+        #         )
+        #         feedback = {"done": False, "message": message}
+        #     self.execution_history.append({"action": action, "feedback": feedback})
+        #     return feedback
+
+        # if action.get("action_type") == "dom_type":
+        #     selector = action.get("selector")
+        #     text = action.get("text")
+        #     if not selector:
+        #         feedback = {"done": False, "message": "selector is required for dom_type"}
+        #     elif text is None:
+        #         feedback = {"done": False, "message": "text is required for dom_type"}
+        #     else:
+        #         message = self._dom_type(
+        #             selector=selector,
+        #             text=text,
+        #             nth=action.get("nth", 0),
+        #             clear_first=action.get("clear_first", True),
+        #             timeout_ms=action.get("timeout_ms", 2000),
+        #         )
+        #         feedback = {"done": False, "message": message}
+        #     self.execution_history.append({"action": action, "feedback": feedback})
+        #     return feedback
+
+        # if action.get("action_type") == "dom_press":
+        #     key = action.get("key")
+        #     if not key:
+        #         feedback = {"done": False, "message": "key is required for dom_press"}
+        #     else:
+        #         message = self._dom_press(
+        #             key=key,
+        #             selector=action.get("selector"),
+        #             nth=action.get("nth", 0),
+        #             timeout_ms=action.get("timeout_ms", 2000),
+        #         )
+        #         feedback = {"done": False, "message": message}
+        #     self.execution_history.append({"action": action, "feedback": feedback})
+        #     return feedback
+
+        # if action.get("action_type") == "dom_scroll":
+        #     message = self._dom_scroll(
+        #         direction=action.get("direction", "down"),
+        #         amount=action.get("amount", 500),
+        #         selector=action.get("selector"),
+        #         nth=action.get("nth", 0),
+        #         timeout_ms=action.get("timeout_ms", 2000),
+        #     )
+        #     feedback = {"done": False, "message": message}
+        #     self.execution_history.append({"action": action, "feedback": feedback})
+        #     return feedback
+
+        if action.get("action_type") == "dom_mark_elements":
+            max_elements = action.get("max_elements", 100)
+            message = self._dom_mark_elements_and_extract(max_elements=max_elements)
+            feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
         if action.get("action_type") == "dom_click":
-            selector = action.get("selector")
-            if not selector:
-                feedback = {"done": False, "message": "selector is required for dom_click"}
+            bid = action.get("bid")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_click"}
             else:
                 message = self._dom_click(
-                    selector=selector,
-                    nth=action.get("nth", 0),
+                    bid=bid,
                     button=action.get("button", "left"),
                     click_count=action.get("click_count", 1),
                     timeout_ms=action.get("timeout_ms", 2000),
                 )
                 feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_hover":
+            bid = action.get("bid")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_hover"}
+            else:
+                message = self._dom_hover(
+                    bid=bid,
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_type":
+            bid = action.get("bid")
+            text = action.get("text")
+            if not bid:
+                feedback = {"done": False, "message": "bid is required for dom_type"}
+            elif text is None:
+                feedback = {"done": False, "message": "text is required for dom_type"}
+            else:
+                message = self._dom_type(
+                    bid=bid,
+                    text=text,
+                    clear_first=action.get("clear_first", True),
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_press":
+            key = action.get("key")
+            bid = action.get("bid")
+            if not key:
+                feedback = {"done": False, "message": "key is required for dom_press"}
+            else:
+                message = self._dom_press(
+                    key=key,
+                    bid=bid,
+                    timeout_ms=action.get("timeout_ms", 2000),
+                )
+                feedback = {"done": False, "message": message}
+            self.execution_history.append({"action": action, "feedback": feedback})
+            return feedback
+
+        if action.get("action_type") == "dom_scroll":
+            message = self._dom_scroll(
+                bid=action.get("bid"),
+                direction=action.get("direction", "down"),
+                amount=action.get("amount", 500),
+                timeout_ms=action.get("timeout_ms", 2000),
+            )
+            feedback = {"done": False, "message": message}
             self.execution_history.append({"action": action, "feedback": feedback})
             return feedback
 
@@ -904,7 +1704,8 @@ class UnifiedSandboxClient(SandboxClient):
                               "browser_scroll", "browser_move_to", "browser_move_rel", "browser_drag_to", "browser_drag_rel",
                               "browser_wait",
                               "dom_get_text", "dom_get_html", "dom_query_selector",
-                              "dom_extract_links", "dom_click", "browser_navigate",
+                              "dom_extract_links", "dom_mark_elements", "dom_click", "dom_hover", "dom_type", "dom_press", "dom_scroll",
+                              "browser_navigate",
                               "browser_screenshot", "browser_get_viewport_info",
                               ]:
                 return self._handle_browser_action(action)

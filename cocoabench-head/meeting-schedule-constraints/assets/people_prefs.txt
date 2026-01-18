@@ -1,9 +1,0 @@
-# People availability and hard constraints
-# Time slots for this scheduling task:
-#   Mon-09:00, Mon-10:00, Mon-11:00, Mon-15:00
-# A person cannot attend a meeting outside the listed slots.
-
-Alice: Mon-09:00, Mon-10:00, Mon-15:00
-Bob: Mon-10:00, Mon-11:00, Mon-15:00
-Carol: Mon-09:00, Mon-10:00, Mon-11:00
-Dan: Mon-09:00, Mon-10:00, Mon-11:00, Mon-15:00
