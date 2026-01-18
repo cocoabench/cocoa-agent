@@ -12,7 +12,7 @@ This will decrypt:
 - metadata.json.enc -> metadata.json
 - solution.md.enc -> solution.md
 
-Note: Original .enc files will be kept.
+Note: Original .enc files will be removed after decryption.
 """
 
 import argparse
@@ -43,7 +43,7 @@ def decrypt(ciphertext_b64: str, password: str) -> str:
 
 
 def decrypt_file(enc_path: Path, canary: str) -> bool:
-    """Decrypt a single .enc file to its original form.
+    """Decrypt a single .enc file to its original form and remove the encrypted file.
     
     Returns True if decrypted, False if file doesn't exist.
     """
@@ -56,6 +56,7 @@ def decrypt_file(enc_path: Path, canary: str) -> bool:
     # Remove .enc extension to get original filename
     original_path = enc_path.parent / enc_path.stem
     original_path.write_text(decrypted, encoding='utf-8')
+    enc_path.unlink()
     
     return True
 
@@ -68,11 +69,6 @@ def decrypt_task(task_dir: Path) -> bool:
     # Check for canary
     if not canary_file.exists():
         print(f"⚠ canary.txt not found, skipping task {task_name}")
-        return False
-    
-    # Check if already decrypted
-    if (task_dir / "instruction.md").exists():
-        print(f"⚠ Task {task_name} appears to be already decrypted, skipping")
         return False
     
     # Check required encrypted files exist
@@ -151,7 +147,7 @@ def main():
     
     print("=" * 60)
     print(f"✅ Successfully decrypted {success_count} task(s)")
-    print(f"📝 Original .enc files are kept for reference")
+    print(f"📁 Encrypted .enc files have been removed")
 
 
 if __name__ == "__main__":
