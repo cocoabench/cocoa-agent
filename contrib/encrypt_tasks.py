@@ -70,11 +70,6 @@ def encrypt_task(task_dir: Path) -> bool:
     """Encrypt task files in place."""
     task_name = task_dir.name
     
-    # Check if already encrypted
-    if (task_dir / "instruction.md.enc").exists():
-        print(f"⚠ Task {task_name} appears to be already encrypted, skipping")
-        return False
-    
     # Check required files exist
     instruction_path = task_dir / "instruction.md"
     evaluation_path = task_dir / "evaluation.md"
