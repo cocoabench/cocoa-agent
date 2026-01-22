@@ -1095,6 +1095,12 @@ class LLM(Controller):
                         try:
                             parsed_response = self.parse_tool_calls_list(tool_calls)
                             logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                            
+                            # IMPORTANT: After successful API call, remove images from old user messages
+                            # Only keep images in the most recent user message (current iteration)
+                            # This prevents image accumulation across iterations
+                            self._cleanup_old_user_message_images()
+                            
                             return parsed_response
                         except ValueError as parse_error:
                             logger.warning(f"Failed to parse {model_name} tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
@@ -1140,6 +1146,12 @@ class LLM(Controller):
                     try:
                         parsed_response = self.parse_tool_calls(message.tool_calls)
                         logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                        
+                        # IMPORTANT: After successful API call, remove images from old user messages
+                        # Only keep images in the most recent user message (current iteration)
+                        # This prevents image accumulation across iterations
+                        self._cleanup_old_user_message_images()
+                        
                         return parsed_response
                     except ValueError as parse_error:
                         logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
@@ -1180,6 +1192,12 @@ class LLM(Controller):
                     try:
                         parsed_response = self.parse_response(assistant_message)
                         logger.debug(f"Parsed response (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                        
+                        # IMPORTANT: After successful API call, remove images from old user messages
+                        # Only keep images in the most recent user message (current iteration)
+                        # This prevents image accumulation across iterations
+                        self._cleanup_old_user_message_images()
+                        
                         return parsed_response
                     except ValueError as parse_error:
                         logger.warning(f"Failed to parse assistant response (attempt {attempt}/{max_attempts}): {parse_error}")
@@ -1549,6 +1567,59 @@ class LLM(Controller):
         }
         self.messages.append(tool_message)
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
+
+    def _remove_images_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove images from a message, keeping only text content.
+        
+        Args:
+            message: Message dictionary with 'role' and 'content' keys
+            
+        Returns:
+            Modified message dictionary with images removed
+        """
+        content = message.get("content", "")
+        if isinstance(content, list):
+            # Filter out image items, keep only text
+            text_items = [
+                item for item in content
+                if not (isinstance(item, dict) and item.get("type") == "image_url")
+            ]
+            # If only one text item remains, extract just the text string
+            if len(text_items) == 1 and isinstance(text_items[0], dict) and text_items[0].get("type") == "text":
+                message["content"] = text_items[0].get("text", "")
+            else:
+                message["content"] = text_items
+        return message
+
+    def _cleanup_old_user_message_images(self) -> None:
+        """Remove images from old user messages, keeping only the most recent user message's images.
+        
+        This prevents image accumulation across iterations. Only the current iteration's images
+        should be included in the API call.
+        """
+        if not (self.is_qwen_vl_model or self.is_qwen_model):
+            return
+        
+        # Find the last user message (should be the one we just added)
+        last_user_msg_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].get("role") == "user":
+                last_user_msg_idx = i
+                break
+        
+        # Remove images from all user messages except the last one
+        if last_user_msg_idx is not None:
+            for i in range(len(self.messages)):
+                if i != last_user_msg_idx and self.messages[i].get("role") == "user":
+                    old_content = self.messages[i].get("content", "")
+                    if isinstance(old_content, list):
+                        # Check if it has images
+                        has_images = any(isinstance(item, dict) and item.get("type") == "image_url"
+                                        for item in old_content)
+                        if has_images:
+                            # Remove images, keep only text
+                            self.messages[i] = self._remove_images_from_message(self.messages[i])
+                            logger.debug(f"Removed images from old user message at index {i}")
 
 
 class Human(Controller):
