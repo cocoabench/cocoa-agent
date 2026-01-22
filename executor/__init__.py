@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .logger import setup_logging, get_logger
-from .controller import LLM, Controller, Human
+from .controller import OpenAILLM, QwenLLM, BaseLLM, Controller, Human, GeminiLLM
 from .sandbox import (
     BrowserSandboxClient,
     UnifiedSandboxClient,
@@ -26,7 +26,10 @@ logger = get_logger("executor")
 
 __all__ = [
     "TaskExecutor",
-    "LLM",
+    "OpenAILLM",
+    "QwenLLM",
+    "BaseLLM",
+    "GeminiLLM",
     "Controller",
     "Human",
     "BrowserSandboxClient",
@@ -113,11 +116,17 @@ class TaskExecutor:
 
             if controller_type == "human":
                 controller = Human()
-            else:  # Default to LLM
+            elif controller_type == "gemini":
                 llm_config = controller_config.get("args", {})
-                controller = LLM(llm_config=llm_config, client_type=client_type)
+                controller = GeminiLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "qwen":
+                llm_config = controller_config.get("args", {})
+                controller = QwenLLM(llm_config=llm_config, client_type=client_type)
+            else:  # Default to OpenAILLM (handles "gpt", "openai", "llm", etc.)
+                llm_config = controller_config.get("args", {})
+                controller = OpenAILLM(llm_config=llm_config, client_type=client_type)
 
-            logger.info(f"Controller initialized: {controller_type}")
+            logger.info(f"Controller initialized: {controller_type} (Model: {llm_config.get('model', 'unknown')})")
 
         self.controller = controller
         if client_type == "unified":
