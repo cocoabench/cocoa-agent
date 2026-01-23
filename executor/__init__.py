@@ -254,6 +254,8 @@ class TaskExecutor:
                 feedbacks = []
                 done = False
                 images_from_current_iteration = []  # Collect all images from current iteration
+                browser_screenshots = [] # Collect only browser screenshots
+                image_read_contents = [] # Collect only image_read contents
                 iteration_actions = []  # Store actions for visualization
                 
                 for single_action in action["actions"]:
@@ -270,16 +272,19 @@ class TaskExecutor:
                             try:
                                 screenshot_base64, _ = self.sandbox_client.take_screenshot()
                                 if screenshot_base64:
-                                    images_from_current_iteration.append(screenshot_base64)
+                                    browser_screenshots.append(screenshot_base64)
                             except Exception as e:
                                 logger.warning(f"Failed to take screenshot after browser action: {e}")
                     
                     # Check if this action was a screenshot or image_read and has image_base64
-                    if single_action.get("action_type") in ["browser_screenshot", "image_read"] and "image_base64" in single_feedback:
+                    if single_action.get("action_type") == "browser_screenshot" and "image_base64" in single_feedback:
                         image_base64 = single_feedback["image_base64"]
-                        # Collect all images from this iteration (avoid duplicates)
-                        if image_base64 not in images_from_current_iteration:
-                            images_from_current_iteration.append(image_base64)
+                        browser_screenshots.append(image_base64)
+                    
+                    if single_action.get("action_type") == "image_read" and "image_base64" in single_feedback:
+                        image_base64 = single_feedback["image_base64"]
+                        if image_base64 not in image_read_contents:
+                            image_read_contents.append(image_base64)
                     
                     # Store action data for visualization
                     action_data = {
@@ -298,12 +303,22 @@ class TaskExecutor:
                     "done": done,
                     "message": "\n".join(feedbacks) # '/n' is used to separate each feedback
                 }
-                # Include image_base64 if any screenshot or image_read action returned one
-                # If multiple images, use the last one for backward compatibility, but store all for next iteration
-                if images_from_current_iteration:
-                    combined_feedback["image_base64"] = images_from_current_iteration[-1]  # Last image for backward compatibility
-                    # Store all images from this iteration for next iteration
-                    images_from_last_iteration = images_from_current_iteration
+                
+                # Construct images list for next iteration
+                # 1. Take ONLY the last browser screenshot if available
+                # 2. Add ALL image_read contents
+                images_from_last_iteration = []
+                
+                if browser_screenshots:
+                    images_from_last_iteration.append(browser_screenshots[-1])
+                
+                # Append all manually read images
+                images_from_last_iteration.extend(image_read_contents)
+                
+                # For backward compatibility in feedback dict (though mostly unused if images_from_last_iteration is set)
+                if images_from_last_iteration:
+                    combined_feedback["image_base64"] = images_from_last_iteration[-1]
+                
                 feedback = combined_feedback
                 
                 # Store iteration data for visualization
