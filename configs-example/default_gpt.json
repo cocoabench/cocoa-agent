@@ -1,0 +1,18 @@
+{
+  "agent_type": "cocoa",
+  "log_level": "DEBUG",
+  "use_encrypted_tasks": false,
+  "controller": {
+      "type": "gpt",
+      "args": {
+          "model": "gpt-4.1-mini",
+          "base_url": "",
+          "api_key": "[YOUR_API_KEY_HERE]"
+      }
+  },
+  "sandbox": {
+      "client_type": "unified",
+      "docker_port": 8084,
+      "max_iterations": 50
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "agent_type": "cocoa",
+  "log_level": "DEBUG",
+  "use_encrypted_tasks": false,
+  "controller": {
+      "type": "gemini",
+      "args": {
+          "model": "gemini-3-flash-preview",
+          "api_key": "[YOUR_API_KEY_HERE]",
+          "use_v1alpha": false
+      }
+  },
+  "sandbox": {
+      "client_type": "unified",
+      "docker_port": 8084,
+      "max_iterations": 50
+  }
+}

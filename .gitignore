@@ -42,17 +42,13 @@ uv.lock
 
 # Project-specific
 temp.log
-results/*
 outputs/*
-gpt-outputs/*
+outputs-*/*
 trash/*
 
 tasks/*
 
 configs/*
-!configs/default_human.json
-!configs/default_gpt.json
-
 # dataset files
 cocoa-bench-v0.1/
 *.zip

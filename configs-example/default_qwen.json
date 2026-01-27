@@ -3,11 +3,11 @@
   "log_level": "DEBUG",
   "use_encrypted_tasks": false,
   "controller": {
-      "type": "llm",
+      "type": "qwen",
       "args": {
-          "model": "gpt-4.1-mini",
-          "base_url": "",
-          "api_key": "[YOUR_API_KEY_HERE]"
+          "model": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+          "base_url": "http://localhost:8005/v1",
+          "api_key": "EMPTY"
       }
   },
   "sandbox": {
