@@ -1255,6 +1255,7 @@ class BaseLLM(Controller):
         self.messages.append(tool_message)
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
     
+
     def _remove_images_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Remove images from a message, keeping only text content.
         
@@ -2196,6 +2197,41 @@ class ClaudeLLM(BaseLLM):
             for i in range(len(self.messages)):
                 if i != last_user_msg_idx and self.messages[i].get("role") == "user":
                     self.messages[i] = self._remove_images_from_message(self.messages[i])
+
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Get the message history in OpenAI-compatible format."""
+        history = []
+        for msg in self.messages:
+            new_msg = msg.copy()
+            content = msg.get("content")
+            
+            if isinstance(content, list):
+                # Handle list content (Claude format)
+                text_parts = []
+                tool_calls = []
+                
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                        elif item.get("type") == "tool_use":
+                            # Convert tool_use to OpenAI tool_call
+                            tool_calls.append({
+                                "id": item.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": item.get("name"),
+                                    "arguments": json.dumps(item.get("input"))
+                                }
+                            })
+                
+                new_msg["content"] = "".join(text_parts)
+                if tool_calls:
+                    new_msg["tool_calls"] = tool_calls
+            
+            history.append(new_msg)
+        return history
 
 
 class GeminiLLM(BaseLLM):
