@@ -1,0 +1,17 @@
+{
+  "agent_type": "cocoa",
+  "log_level": "DEBUG",
+  "use_encrypted_tasks": false,
+  "controller": {
+      "type": "claude",
+      "args": {
+          "model": "claude-sonnet-4-5",
+          "api_key": "[YOUR_API_KEY_HERE]"
+      }
+  },
+  "sandbox": {
+      "client_type": "unified",
+      "docker_port": 8084,
+      "max_iterations": 30
+  }
+}

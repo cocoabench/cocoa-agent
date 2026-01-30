@@ -167,10 +167,70 @@ def main():
             with open(output_file, 'w') as f:
                 json.dump(result, f, indent=2)
             logger.debug(f"Task {task_name} result saved to {output_file}")
+        except Exception as e:
+            logger.error(f"Task {task_name} failed with error: {e}")
+            # Save error result
+            error_result = {
+                "status": "error",
+                "error": str(e),
+                "task_name": task_name
+            }
+            output_file = Path(args.output_dir) / f"{task_name}.json"
+            with open(output_file, 'w') as f:
+                json.dump(error_result, f, indent=2)
         finally:
             agent.cleanup_environment()
 
     logger.info(f"Processed {len(tasks)} tasks. Results saved to {args.output_dir}")
+
+    # Calculate statistics
+    total_tasks = 0
+    passed_tasks = 0
+    error_tasks = 0
+    passed_list = []
+    error_list = []
+    
+    output_path = Path(args.output_dir)
+    if output_path.exists():
+        for json_file in output_path.glob("*.json"):
+            try:
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    total_tasks += 1
+                    if data.get("status") == "error":
+                        error_tasks += 1
+                        error_list.append(json_file.stem)
+                    elif data.get("eval", {}).get("passed", False) is True:
+                        passed_tasks += 1
+                        passed_list.append(json_file.stem)
+            except Exception as e:
+                logger.error(f"Error reading {json_file}: {e}")
+
+    success_rate = (passed_tasks / total_tasks * 100) if total_tasks > 0 else 0.0
+    
+    stats_content = (
+        f"Total Tasks: {total_tasks}\n"
+        f"Passed: {passed_tasks}\n"
+        f"Failed: {total_tasks - passed_tasks - error_tasks}\n"
+        f"Errors: {error_tasks}\n"
+        f"Success Rate: {success_rate:.2f}%\n"
+    )
+    
+    if passed_list:
+        stats_content += "\nPassed Tasks:\n"
+        for task_name in sorted(passed_list):
+            stats_content += f"  - {task_name}\n"
+
+    if error_list:
+        stats_content += "\nError Tasks:\n"
+        for task_name in sorted(error_list):
+            stats_content += f"  - {task_name}\n"
+    
+    stats_file = output_path / "statistics.txt"
+    with open(stats_file, 'w') as f:
+        f.write(stats_content)
+        
+    logger.info(f"Statistics saved to {stats_file}")
 
 
 if __name__ == "__main__":
