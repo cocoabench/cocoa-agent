@@ -982,10 +982,11 @@ class BaseLLM(Controller):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message")
@@ -993,6 +994,34 @@ class BaseLLM(Controller):
         else:
             # Regular text message
             return prompt
+
+    def _detect_image_media_type(self, img_base64: str) -> str:
+        if not isinstance(img_base64, str) or not img_base64:
+            return "image/png"
+        if img_base64.startswith("data:"):
+            try:
+                header = img_base64.split(",", 1)[0]
+                if ";" in header:
+                    return header.split(";", 1)[0].replace("data:", "") or "image/png"
+            except Exception:
+                return "image/png"
+        import base64
+        prefix = img_base64[:128]
+        if len(prefix) % 4 != 0:
+            prefix += "=" * (4 - (len(prefix) % 4))
+        try:
+            data = base64.b64decode(prefix, validate=False)
+        except Exception:
+            return "image/png"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if data.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            return "image/gif"
+        if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp"
+        return "image/png"
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle API response and parse into action format.
@@ -1382,10 +1411,11 @@ class OpenAILLM(BaseLLM):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message (total size: {sum(len(img) for img in images_base64)} chars)")
@@ -2000,11 +2030,12 @@ class ClaudeLLM(BaseLLM):
             # Add images first (or text first? Claude documentation says text/image order doesn't matter much but usually alternating)
             # The user example has image first then text.
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png", # Assuming PNG for now
+                        "media_type": media_type,
                         "data": img_base64,
                     }
                 })
@@ -2210,11 +2241,13 @@ class ClaudeLLM(BaseLLM):
                 # Handle list content (Claude format)
                 text_parts = []
                 tool_calls = []
+                has_only_tool_results = True
                 
                 for item in content:
                     if isinstance(item, dict):
                         if item.get("type") == "text":
                             text_parts.append(item.get("text", ""))
+                            has_only_tool_results = False
                         elif item.get("type") == "tool_use":
                             # Convert tool_use to OpenAI tool_call
                             tool_calls.append({
@@ -2225,7 +2258,11 @@ class ClaudeLLM(BaseLLM):
                                     "arguments": json.dumps(item.get("input"))
                                 }
                             })
+                            has_only_tool_results = False
                 
+                if has_only_tool_results:
+                    continue
+
                 new_msg["content"] = "".join(text_parts)
                 if tool_calls:
                     new_msg["tool_calls"] = tool_calls

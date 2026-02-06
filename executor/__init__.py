@@ -133,6 +133,19 @@ class TaskExecutor:
             logger.info(f"Controller initialized: {controller_type} (Model: {llm_config.get('model', 'unknown')})")
 
         self.controller = controller
+        if "llm_provider" not in sandbox_config:
+            if isinstance(controller, ClaudeLLM):
+                sandbox_config["llm_provider"] = "claude"
+            elif isinstance(controller, GeminiLLM):
+                sandbox_config["llm_provider"] = "gemini"
+            elif isinstance(controller, QwenLLM):
+                sandbox_config["llm_provider"] = "qwen"
+            elif isinstance(controller, OpenAILLM):
+                sandbox_config["llm_provider"] = "openai"
+            else:
+                sandbox_config["llm_provider"] = controller_type if "controller_type" in locals() else "llm"
+        if "llm_model" not in sandbox_config:
+            sandbox_config["llm_model"] = getattr(controller, "model", None)
         if client_type == "unified":
             self.sandbox_client = UnifiedSandboxClient(sandbox_config=sandbox_config)
             logger.info("Using UnifiedSandboxClient (browser + file + code + shell)")
