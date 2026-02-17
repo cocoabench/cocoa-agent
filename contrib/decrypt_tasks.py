@@ -5,13 +5,15 @@ Decrypt task files for local viewing/editing.
 Usage:
     python decrypt_tasks.py --task my-task     # Decrypt a specific task
     python decrypt_tasks.py                    # Decrypt all tasks in cocoabench-head/
-    
-This will decrypt:
+    python decrypt_tasks.py --solution        # Only decrypt solution.md.enc in each task
+
+By default this will decrypt:
 - instruction.md.enc -> instruction.md
 - evaluation.md.enc -> evaluation.md
 - metadata.json.enc -> metadata.json
 - solution.md.enc -> solution.md
 
+With --solution, only solution.md.enc is decrypted (no requirement for other files).
 Note: Original .enc files will be removed after decryption.
 """
 
@@ -61,49 +63,52 @@ def decrypt_file(enc_path: Path, canary: str) -> bool:
     return True
 
 
-def decrypt_task(task_dir: Path) -> bool:
-    """Decrypt task files in place."""
+def decrypt_task(task_dir: Path, solution_only: bool = False) -> bool:
+    """Decrypt task files in place.
+    
+    If solution_only is True, only decrypt solution.md.enc (no requirement for other files).
+    Otherwise decrypt instruction, evaluation, metadata, and solution.
+    """
     task_name = task_dir.name
     canary_file = task_dir / "canary.txt"
-    
-    # Check for canary
+
     if not canary_file.exists():
         print(f"⚠ canary.txt not found, skipping task {task_name}")
         return False
-    
-    # Check required encrypted files exist
+
+    canary = canary_file.read_text(encoding="utf-8").strip()
+
+    if solution_only:
+        # Only decrypt solution.md.enc
+        solution_enc = task_dir / "solution.md.enc"
+        if not solution_enc.exists():
+            return False
+        print(f"✓ Decrypting solution: {task_name}")
+        decrypt_file(solution_enc, canary)
+        print(f"  - solution.md.enc -> solution.md")
+        return True
+
+    # Default: require instruction + evaluation, decrypt all
     instruction_enc = task_dir / "instruction.md.enc"
     evaluation_enc = task_dir / "evaluation.md.enc"
-    
     if not instruction_enc.exists():
         print(f"⚠ instruction.md.enc not found, skipping task {task_name}")
         return False
-    
     if not evaluation_enc.exists():
         print(f"⚠ evaluation.md.enc not found, skipping task {task_name}")
         return False
-    
-    # Read canary
-    canary = canary_file.read_text().strip()
-    
+
     print(f"✓ Decrypting task: {task_name}")
-    
-    # Decrypt required files
     decrypt_file(instruction_enc, canary)
     print(f"  - instruction.md.enc -> instruction.md")
-    
     decrypt_file(evaluation_enc, canary)
     print(f"  - evaluation.md.enc -> evaluation.md")
-    
-    # Decrypt optional files
     metadata_enc = task_dir / "metadata.json.enc"
     if decrypt_file(metadata_enc, canary):
         print(f"  - metadata.json.enc -> metadata.json")
-    
     solution_enc = task_dir / "solution.md.enc"
     if decrypt_file(solution_enc, canary):
         print(f"  - solution.md.enc -> solution.md")
-    
     return True
 
 
@@ -116,7 +121,12 @@ def main():
         type=str,
         help="Name of a specific task to decrypt (optional, decrypts all if not specified)"
     )
-    
+    parser.add_argument(
+        "--solution",
+        action="store_true",
+        help="Only decrypt solution.md.enc in each task (ignore other files)"
+    )
+
     args = parser.parse_args()
     
     if not tasks_dir.exists():
@@ -135,13 +145,13 @@ def main():
         if not task_path.exists():
             print(f"❌ Error: Task '{args.task}' not found in {tasks_dir}")
             return
-        if decrypt_task(task_path):
+        if decrypt_task(task_path, solution_only=args.solution):
             success_count += 1
     else:
         # Decrypt all tasks
         for task_path in sorted(tasks_dir.iterdir()):
             if task_path.is_dir():
-                if decrypt_task(task_path):
+                if decrypt_task(task_path, solution_only=args.solution):
                     success_count += 1
                 print()
     

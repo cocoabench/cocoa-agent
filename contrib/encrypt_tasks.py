@@ -3,15 +3,18 @@
 Encrypt task files for safe contribution.
 
 Usage:
-    python encrypt_tasks.py                    # Encrypt all tasks in cocoabench-head/
+    python encrypt_tasks.py                    # Encrypt all tasks (instruction, evaluation, metadata, solution)
     python encrypt_tasks.py --task my-task     # Encrypt a specific task
-    
-This will encrypt:
+    python encrypt_tasks.py --solution        # Only encrypt solution.md in each task (ignore other files)
+
+By default this will encrypt:
 - instruction.md -> instruction.md.enc
 - evaluation.md -> evaluation.md.enc
 - metadata.json -> metadata.json.enc
 - solution.md -> solution.md.enc
-- Create canary.txt with the encryption key
+- Create canary.txt with the encryption key (use existing canary.txt if present, do not overwrite)
+
+With --solution, only solution.md is encrypted in each task folder (no requirement for other files).
 """
 
 import argparse
@@ -66,47 +69,67 @@ def encrypt_file(file_path: Path, canary: str) -> bool:
     return True
 
 
-def encrypt_task(task_dir: Path) -> bool:
-    """Encrypt task files in place."""
-    task_name = task_dir.name
+def get_or_create_canary(task_dir: Path, task_name: str) -> tuple[str, bool]:
+    """Use existing canary.txt if present, otherwise generate from task name.
+    Returns (canary, created_new): created_new is True only when we generated and will write it.
+    """
+    canary_file = task_dir / "canary.txt"
+    if canary_file.exists():
+        return canary_file.read_text(encoding="utf-8").strip(), False
+    return generate_canary(task_name), True
+
+
+def encrypt_task(task_dir: Path, solution_only: bool = False) -> bool:
+    """Encrypt task files in place.
     
-    # Check required files exist
+    If solution_only is True, only encrypt solution.md (no requirement for other files).
+    Otherwise encrypt instruction.md, evaluation.md, metadata.json, and solution.md.
+    Uses existing canary.txt if present; only creates it when missing.
+    """
+    task_name = task_dir.name
+    canary, canary_is_new = get_or_create_canary(task_dir, task_name)
+
+    if solution_only:
+        # Only encrypt solution.md; ignore other files
+        solution_path = task_dir / "solution.md"
+        if not solution_path.exists():
+            return False
+        print(f"✓ Encrypting solution: {task_name}")
+        encrypt_file(solution_path, canary)
+        print(f"  - solution.md -> solution.md.enc")
+        if canary_is_new:
+            (task_dir / "canary.txt").write_text(canary)
+            print(f"  - Created canary.txt")
+        else:
+            print(f"  - Using existing canary.txt")
+        return True
+
+    # Default: require instruction + evaluation, encrypt all
     instruction_path = task_dir / "instruction.md"
     evaluation_path = task_dir / "evaluation.md"
-    
     if not instruction_path.exists():
         print(f"⚠ instruction.md not found, skipping task {task_name}")
         return False
-    
     if not evaluation_path.exists():
         print(f"⚠ evaluation.md not found, skipping task {task_name}")
         return False
-    
-    # Generate canary for this task
-    canary = generate_canary(task_name)
-    
+
     print(f"✓ Encrypting task: {task_name}")
-    
-    # Encrypt required files
     encrypt_file(instruction_path, canary)
     print(f"  - instruction.md -> instruction.md.enc")
-    
     encrypt_file(evaluation_path, canary)
     print(f"  - evaluation.md -> evaluation.md.enc")
-    
-    # Encrypt optional files
-    metadata_path = task_dir / "metadata.json"
-    if encrypt_file(metadata_path, canary):
-        print(f"  - metadata.json -> metadata.json.enc")
-    
     solution_path = task_dir / "solution.md"
     if encrypt_file(solution_path, canary):
         print(f"  - solution.md -> solution.md.enc")
-    
-    # Write canary
-    (task_dir / "canary.txt").write_text(canary)
-    print(f"  - Created canary.txt")
-    
+    metadata_path = task_dir / "metadata.json"
+    if encrypt_file(metadata_path, canary):
+        print(f"  - metadata.json -> metadata.json.enc")
+    if canary_is_new:
+        (task_dir / "canary.txt").write_text(canary)
+        print(f"  - Created canary.txt")
+    else:
+        print(f"  - Using existing canary.txt")
     return True
 
 
@@ -119,7 +142,12 @@ def main():
         type=str,
         help="Name of a specific task to encrypt (optional, encrypts all if not specified)"
     )
-    
+    parser.add_argument(
+        "--solution",
+        action="store_true",
+        help="Only encrypt solution.md in each task (ignore other files)"
+    )
+
     args = parser.parse_args()
     
     if not tasks_dir.exists():
@@ -139,13 +167,13 @@ def main():
         if not task_path.exists():
             print(f"❌ Error: Task '{args.task}' not found in {tasks_dir}")
             return
-        if encrypt_task(task_path):
+        if encrypt_task(task_path, solution_only=args.solution):
             success_count += 1
     else:
         # Encrypt all tasks
         for task_path in sorted(tasks_dir.iterdir()):
             if task_path.is_dir():
-                if encrypt_task(task_path):
+                if encrypt_task(task_path, solution_only=args.solution):
                     success_count += 1
                 print()
     
