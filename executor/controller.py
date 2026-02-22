@@ -1962,6 +1962,232 @@ class QwenLLM(OpenAILLM):
                             logger.debug(f"Removed images from old user message at index {i}")
 
 
+class GLMLLM(OpenAILLM):
+    """Language model client for Zhipu AI GLM models (OpenAI-compatible)."""
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set GLM defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://open.bigmodel.cn/api/paas/v4/"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "glm-4-plus"
+
+        # Resolve API key from GLM-specific env vars before falling back to OpenAI logic
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            glm_key = os.getenv("ZHIPUAI_API_KEY") or os.getenv("GLM_API_KEY")
+            if glm_key:
+                llm_config["api_key"] = glm_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        self.is_vl_model = any(tag in self.model.lower() for tag in ["4.6v", "4.5v", "4v-", "-vl"])
+        logger.info(f"GLMLLM initialized with model: {self.model} (is_vl: {self.is_vl_model})")
+
+
+class KimiLLM(OpenAILLM):
+    """Language model client for Moonshot AI Kimi models (OpenAI-compatible)."""
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set Kimi defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://api.moonshot.ai/v1"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "kimi-k2-turbo-preview"
+
+        # Resolve API key from Kimi-specific env vars
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            kimi_key = os.getenv("MOONSHOT_API_KEY") or os.getenv("KIMI_API_KEY")
+            if kimi_key:
+                llm_config["api_key"] = kimi_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        self.is_multimodal = any(tag in self.model.lower() for tag in ["k2.5", "k2-5"])
+        logger.info(f"KimiLLM initialized with model: {self.model} (is_multimodal: {self.is_multimodal})")
+
+
+class DeepSeekLLM(OpenAILLM):
+    """Language model client for DeepSeek models (text-only, with thinking mode support).
+
+    DeepSeek V3.2 does not support image/vision input. This controller:
+    - Filters out image-related tools (browser_screenshot, image_read)
+    - Always strips images from message content
+    - Supports thinking mode with reasoning_content pass-back for multi-step tool reasoning
+    """
+
+    IMAGE_TOOL_NAMES = {"browser_screenshot", "image_read"}
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set DeepSeek defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://api.deepseek.com"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "deepseek-chat"
+
+        # Resolve API key from DeepSeek-specific env var
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            ds_key = os.getenv("DEEPSEEK_API_KEY")
+            if ds_key:
+                llm_config["api_key"] = ds_key
+
+        self.enable_thinking = llm_config.get("enable_thinking", True)
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        # Filter out image-related tools since DeepSeek is text-only
+        if self.tools:
+            self.tools = [
+                t for t in self.tools
+                if t.get("function", {}).get("name") not in self.IMAGE_TOOL_NAMES
+            ]
+
+        logger.info(f"DeepSeekLLM initialized with model: {self.model} (thinking: {self.enable_thinking})")
+
+    def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
+        """DeepSeek is text-only: always return plain text, ignoring any images."""
+        if images_base64:
+            logger.debug(f"DeepSeekLLM: discarding {len(images_base64)} image(s) (text-only model)")
+        return prompt
+
+    def _make_api_call(self) -> Any:
+        """Make DeepSeek API call with optional thinking mode."""
+        api_params = {
+            "model": self.model,
+            "messages": self.messages,
+        }
+        if self.use_tools and self.tools:
+            api_params["tools"] = self.tools
+        if self.enable_thinking:
+            api_params["extra_body"] = {"thinking": {"type": "enabled"}}
+        return self.client.chat.completions.create(**api_params)
+
+    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
+        """Handle DeepSeek response with reasoning_content pass-back for thinking mode."""
+        # Cost tracking
+        if hasattr(response, "usage") and response.usage:
+            usage = response.usage
+            cost = calculate_cost(usage, self.model)
+            self.total_cost += cost
+            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
+            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
+            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
+            self.api_calls += 1
+
+            logger.info(
+                f"API call cost: ${cost:.6f} | "
+                f"Tokens: {getattr(usage, 'prompt_tokens', 0)} input, "
+                f"{getattr(usage, 'completion_tokens', 0)} output, "
+                f"{getattr(usage, 'cached_tokens', 0)} cached | "
+                f"Total cost: ${self.total_cost:.6f}"
+            )
+
+        message = response.choices[0].message
+        reasoning_content = getattr(message, "reasoning_content", None)
+
+        # Handle tool calling response
+        if self.use_tools and hasattr(message, "tool_calls") and message.tool_calls:
+            self.last_think = reasoning_content or message.content
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in message.tool_calls
+                ]
+            }
+            # Pass back reasoning_content so the model can continue multi-step reasoning
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            self.messages.append(assistant_msg)
+
+            logger.debug(f"Received {len(message.tool_calls)} tool calls from {self.model}")
+
+            try:
+                parsed_response = self.parse_tool_calls(message.tool_calls)
+                logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                return parsed_response
+            except ValueError as parse_error:
+                logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
+                for tc in message.tool_calls:
+                    tool_call_id = getattr(tc, "id", None)
+                    if tool_call_id:
+                        self.add_tool_message(tool_call_id, f"Error parsing tool call: {str(parse_error)}")
+
+                if attempt >= max_attempts:
+                    return {
+                        "action_type": "error",
+                        "error_message": str(parse_error),
+                        "tool_calls": message.tool_calls
+                    }
+                error_message = (
+                    f"Error parsing tool calls: {str(parse_error)}\n"
+                    f"Please check the tool parameters and try again. "
+                    f"Make sure you only use the parameters documented for each tool."
+                )
+                self.messages.append({"role": "user", "content": error_message})
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+        else:
+            # Regular text response
+            assistant_message = message.content if message.content else ""
+            self.last_think = reasoning_content or assistant_message
+
+            assistant_msg = {"role": "assistant", "content": assistant_message}
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            self.messages.append(assistant_msg)
+
+            logger.debug(f"Received response from {self.model} (length: {len(assistant_message)} chars)")
+
+            try:
+                parsed_response = self.parse_response(assistant_message)
+                logger.debug(f"Parsed response (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                return parsed_response
+            except ValueError as parse_error:
+                logger.warning(f"Failed to parse response (attempt {attempt}/{max_attempts}): {parse_error}")
+                if attempt >= max_attempts:
+                    raise
+                correction_prompt = (
+                    "Your previous response did not follow the required format. "
+                    "Always respond with either (a) a tool call, or (b) a JSON object describing the next action."
+                )
+                self.messages.append({"role": "user", "content": correction_prompt})
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+
+    def _cleanup_old_user_message_images(self) -> None:
+        """No-op: DeepSeek never has images in messages."""
+        pass
+
+    def _clear_old_reasoning_content(self) -> None:
+        """Clear reasoning_content from old assistant messages to save bandwidth."""
+        for msg in self.messages:
+            if msg.get("role") == "assistant" and "reasoning_content" in msg:
+                msg["reasoning_content"] = None
+
+    def call(self, prompt: str, images_base64: list = None) -> Dict[str, Any]:
+        """Override call to clear old reasoning_content before new user turns."""
+        self._clear_old_reasoning_content()
+        return super().call(prompt, images_base64)
+
+
 class ClaudeLLM(BaseLLM):
     """Language model client using Anthropic Claude API."""
 
