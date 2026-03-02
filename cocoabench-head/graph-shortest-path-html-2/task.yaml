@@ -1,0 +1,16 @@
+instruction: |-
+  Here is a graph problem presented in the HTML file. Please solve the shortest-path task and format the answer exactly as required.
+
+  **Output Format:**
+
+  Return your answer in the following format:
+
+  ```
+  <answer>
+  PATH: v1->v2->v5->v7->v8
+  TOTAL_WEIGHT: 10
+  </answer>
+  ```
+
+  The file is located at:
+  - `graph_task_spec_graph_shortest_path_html_2.html`

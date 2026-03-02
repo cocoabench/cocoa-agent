@@ -1,0 +1,24 @@
+instruction: |-
+  Estimate how many linear regimes best explain y as a function of t. Return the regime count and breakpoint dates.
+
+  **Output Format:**
+
+  Return a JSON object wrapped in ```json code blocks with the following fields:
+
+  ```json
+  {
+    "regime_count": 3,
+    "breakpoints": ["2024-05-17", "2024-06-07"]
+  }
+  ```
+
+  **Requirements:**
+  - `regime_count` should be an integer
+  - `breakpoints` should be listed in ascending order
+  - Dates should be in YYYY-MM-DD format
+  - A tolerance of +/-7 days is acceptable when evaluating breakpoint correctness
+
+  Use the provided CSV file in the task folder:
+  - `series_linear_regime_estimation_2_2.csv`
+
+  The file contains columns: `date`, `t`, `y`.
