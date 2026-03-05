@@ -53,3 +53,6 @@ configs/*
 cocoa-bench-v0.1/
 *.zip
 
+
+# Exclude local working task
+cocoabench-head/yearly-costco-receipts
