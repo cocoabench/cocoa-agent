@@ -300,6 +300,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -362,7 +368,7 @@ Task:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 """
 
 UNIFIED_FEEDBACK_PROMPT_TEMPLATE = """
@@ -602,6 +608,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -671,7 +683,7 @@ To call a tool, use this format:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 
 ## Summary
 Act visually, verify rigorously, and avoid blind exploration. Prefer one extra screenshot + VLM judgement before any ambiguous click.
