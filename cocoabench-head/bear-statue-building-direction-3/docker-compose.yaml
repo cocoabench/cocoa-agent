@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${TASK_DOCKER_IMAGE_NAME}
+    container_name: ${TASK_DOCKER_CONTAINER_NAME}
+    security_opt:
+      - seccomp=unconfined
+    ports:
+      - "${HOST_PORT}:8080"
+    stdin_open: true
+    tty: true

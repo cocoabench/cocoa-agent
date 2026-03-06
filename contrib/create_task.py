@@ -185,14 +185,28 @@ def create_instruction_md(task_data: Dict) -> str:
         for req in task_data['requirements']:
             content += f"- {req}\n"
     
-    content += f"""
+    content += "\n\n**Output Format:**\n\n"
+    content += task_data['answer_format']
     
-**Output Format:**
+    # Add example answer format if provided
+    if task_data.get('answer_format_example'):
+        content += f"""
+
+**Example:**
+
+```
+<answer>{task_data['answer_format_example']}</answer>
+```
+
+Submit your answer using the same format as the example above.
+"""
+    else:
+        content += """
 
 Submit your answer in the following format:
 
 ```
-<answer>{task_data['answer_format']}</answer>
+<answer>your_answer</answer>
 ```
 """
     return content
@@ -257,11 +271,12 @@ def run_wizard():
 
 {Colors.BOLD}What makes a good task?{Colors.END}
 {Colors.GREEN}✓{Colors.END} Multi-step tasks requiring various skills
-{Colors.GREEN}✓{Colors.END} Clear, verifiable answers that can be evaluated automatically
+{Colors.GREEN}✓{Colors.END} Clear answers with unique format (evaluated via exact match)
 {Colors.GREEN}✓{Colors.END} Realistic challenges based on real-world problems
 {Colors.GREEN}✓{Colors.END} Tasks that test web browsing, visual perception, coding, or reasoning
 
 {Colors.BOLD}What to avoid:{Colors.END}
+{Colors.RED}✗{Colors.END} Answers with multiple valid representations (e.g., "1000" vs "1,000")
 {Colors.RED}✗{Colors.END} Tasks with subjective or opinion-based answers
 {Colors.RED}✗{Colors.END} Time-sensitive data that will become stale
 {Colors.RED}✗{Colors.END} Trivial single-step tasks
@@ -334,21 +349,40 @@ Example:
     print(f"""
 {Colors.CYAN}What is the correct answer? This is used for automatic evaluation.{Colors.END}
 
+{Colors.YELLOW} Exact Match:{Colors.END} Answers are evaluated using exact string match.
+Make sure your answer has ONE unique representation (specify format in instruction).
+
 Examples:
   • "42"
   • "Paris, France"  
   • "John Smith, 1985"
 """)
     
-    task_data['expected_answer'] = get_input("Expected answer")
+    task_data['expected_answer'] = get_input("Expected answer (exact string to match)")
     task_data['final_answer'] = task_data['expected_answer']
     
-    # Answer format
+    # Answer format description
     print(f"""
-{Colors.CYAN}How should the agent format their answer?{Colors.END}
+{Colors.CYAN}Describe the format so the agent produces the exact answer above if correct.{Colors.END}
+{Colors.YELLOW}Tip: Be as specific as possible (e.g., "integer without commas", "YYYY-MM-DD", "2 decimal places"){Colors.END}
 """)
-    format_example = get_input("Answer format example (e.g., 'city name', 'number')", "your_answer")
-    task_data['answer_format'] = format_example
+    task_data['answer_format'] = get_multiline_input(
+        "Answer format description:",
+        "Describe the expected format in detail"
+    )
+    
+    # Example answer format
+    print(f"""
+{Colors.CYAN}Provide an example answer to show the format (NOT the actual correct answer).{Colors.END}
+{Colors.YELLOW}This helps the agent understand the expected output structure.{Colors.END}
+
+Example: If correct answer is "Paris, France", you might write "Berlin, Germany"
+         If correct answer is "42.5%", you might write "XX.X%"
+""")
+    task_data['answer_format_example'] = get_multiline_input(
+        "Example answer (using same format, but not the real answer):",
+        "Show the format with a placeholder/example value"
+    )
     
     # Simplified - no separate requirements/task_detail needed
     task_data['requirements'] = []
@@ -455,12 +489,22 @@ Please include the chat transcript link when you test.
     # Step 7: Review & Create
     # =====================
     print_step(7, total_steps, "Review & Create")
+    
+    # Truncate long text for display
+    def truncate(text: str, max_len: int = 50) -> str:
+        if '\n' in text:
+            first_line = text.split('\n')[0]
+            return first_line[:max_len] + "..." if len(first_line) > max_len else first_line + " [...]"
+        return text[:max_len] + "..." if len(text) > max_len else text
+    
     print(f"""
 {Colors.CYAN}Here's a summary of your task:{Colors.END}
 
   Name: {task_name}
   Author: {task_data['author']}
   Expected Answer: {task_data['expected_answer']}
+  Answer Format: {truncate(task_data['answer_format'])}
+  Format Example: {truncate(task_data.get('answer_format_example', 'N/A'))}
   Resources: {task_data['initialization']}
 """)
     

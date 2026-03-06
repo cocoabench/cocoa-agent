@@ -106,7 +106,7 @@ def main():
     parser.add_argument(
         "--tasks-dir",
         type=str,
-        required=True,
+        default="cocoabench-head",
         help="Path to the tasks directory containing task subdirectories"
     )
     

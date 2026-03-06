@@ -40,10 +40,11 @@ python validate_task.py your-task-name --check-encrypted
 
 Great tasks tend to share these qualities:
 
-- 🧩 Require **multi-step solutions** — not just a single lookup
-- ✓ Have **clear, verifiable answers** — so we can evaluate automatically
-- 🌐 Involve **web browsing, visual perception, or file processing**
-- 🔧 Combine **multiple tools** (e.g., search + calculation + code)
+- 🧩 Require **multi-step solutions** — long-horizon tasks that take at least 5 minutes for humans or agents to complete, not just a single lookup
+- ✓ Have **clear, deterministic answers** — evaluated via **exact match** (see [Answer Format Requirements](#answer-format-requirements))
+- 🆕 **Distinctly different from existing tasks** — avoid duplicating scenarios already covered in the benchmark
+
+> ⭐ **Required:** New tasks should highlight **combining GUI interaction with coding abilities**. For example, tasks where the agent must interact with a web UI to gather data, and write code to process or analyze it. These tasks test the agent's ability to seamlessly switch between visual/interactive skills and programming skills, which is a key capability for real-world agentic workflows.
 
 Feel free to browse our [example tasks](https://cocoabench.github.io/#examples) for inspiration!
 
@@ -149,6 +150,8 @@ Then open a PR on GitHub with:
 2. **Include clear success criteria** – The answer should be unambiguous
 3. **Test your task thoroughly** – Solve it yourself before submission
 
+> ⚠️ **Exact Match Evaluation:** All tasks are evaluated using exact string match. This enables fully automated evaluation, ensures consistent and reproducible results, and makes it easy for others to use and extend the benchmark. The agent's output must exactly match the expected answer, so always specify the exact format in your instruction (e.g., "Provide as an integer without commas", "Use YYYY-MM-DD format", "Round to 2 decimal places"). See examples in `cocoabench-example-tasks/`.
+
 ---
 
 ## Need Help?
@@ -211,6 +214,7 @@ This file contains **only** the task prompt. It should be ready to send directly
 - ✅ Use clear, unambiguous language
 - ✅ Include all necessary context and constraints
 - ✅ Always end with an **Output Format** section using `<answer>` tags
+- ✅ Specify the exact answer format to ensure the answer is unique (for exact match evaluation)
 
 **Template:**
 
@@ -244,7 +248,7 @@ Contains the expected answer and initialization resources.
 
 ## Evaluation Criteria
 
-[The correct answer - exact value, tolerance range, or matching criteria]
+**Expected Answer (Exact Match):** [The exact string that the agent's output must match]
 
 ## Agent Output Example
 
@@ -254,14 +258,12 @@ Chat transcript: [link to chat]
 
 > 🎯 **Goal:** At least one agent should fail! Test with one agent (recommended: Gemini 3 Pro, ChatGPT Agent, or Claude 4.5) that fails and include the chat transcript link.
 
-**⚠️ Evaluation Criteria Rule:**
+**⚠️ Exact Match Evaluation:**
 
-The final output of an agent should be easy to evaluate programmatically, ideally as a **simple string or number** that can be verified using a lightweight Python script. This enables reliable automatic evaluation without requiring complex verification logic.
+All tasks are evaluated using exact string match. The expected answer should be a single, unambiguous value. Define the exact format in your instruction.md to ensure uniqueness (e.g., specify decimal places, date format, capitalization).
 
-- ✅ Good: `$52.10` or `London` or `{"a": 1, "b": 3}`
-- ✅ Good: Numeric with tolerance or string with fuzzy match: `2.8 (±0.1)`
-- ❌ Avoid: Open-ended output that require human evaluation
-- ❌ Avoid: Tasks that need a very complex evaluation scripts to verify correctness
+- ✅ Good: `52.10`, `London`, `2024-01-15`
+- ❌ Avoid: Answers with multiple valid representations or open-ended outputs
 
 **Initialization Types:**
 
