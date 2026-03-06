@@ -3,16 +3,16 @@
   "log_level": "DEBUG",
   "use_encrypted_tasks": false,
   "controller": {
-      "type": "glm",
-      "args": {
-          "model": "glm-4-plus",
-          "base_url": "",
-          "api_key": "[YOUR_API_KEY_HERE]"
-      }
+    "type": "glm",
+    "args": {
+      "model": "glm-4.6v",
+      "base_url": "http://localhost:8004/v1",
+      "api_key": "EMPTY"
+    }
   },
   "sandbox": {
-      "client_type": "unified",
-      "docker_port": 8084,
-      "max_iterations": 50
+    "client_type": "unified",
+    "docker_port": 8084,
+    "max_iterations": 30
   }
 }

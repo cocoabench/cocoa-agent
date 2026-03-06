@@ -843,6 +843,17 @@ OPENAI_PRICING = {
 }
 
 
+def is_openai_priced_model(model_name: str) -> bool:
+    """Return True if the model has known OpenAI pricing (only these get cost tracking/logging)."""
+    model_lower = model_name.lower()
+    if model_lower in OPENAI_PRICING:
+        return True
+    for key in OPENAI_PRICING:
+        if model_lower.startswith(key) or key in model_lower:
+            return True
+    return False
+
+
 def get_model_pricing(model_name: str) -> Dict[str, float | None]:
     """Get pricing for a model, with fallback to closest match.
     
@@ -1440,8 +1451,8 @@ class OpenAILLM(BaseLLM):
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle OpenAI API response."""
-        # Calculate and track API cost
-        if hasattr(response, "usage") and response.usage:
+        # Calculate and track API cost (only for OpenAI GPT models with known pricing)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
             usage = response.usage
             cost = calculate_cost(usage, self.model)
             self.total_cost += cost
@@ -1680,12 +1691,19 @@ class OpenAILLM(BaseLLM):
 
 
 class QwenLLM(OpenAILLM):
-    """Language model client for Qwen models (compatible with OpenAI API but with special handling)."""
+    """Language model client for Qwen models (compatible with OpenAI API but with special handling).
+
+    Handles two distinct model families:
+    - Qwen3-VL: text-based tool calling via <tool_call> tags, special prompt templates
+    - Qwen3.5+: standard OpenAI tool calling (server-side --tool-call-parser), reasoning_content support
+    """
 
     def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
         super().__init__(llm_config, client_type, **kwargs)
-        self.is_qwen_vl_model = "qwen3-vl" in self.model.lower() or "qwen3_vl" in self.model.lower()
-        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model})")
+        model_lower = self.model.lower()
+        self.is_qwen_vl_model = "qwen3-vl" in model_lower or "qwen3_vl" in model_lower
+        self.is_qwen35_model = "qwen3.5" in model_lower or "qwen3_5" in model_lower
+        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model}, is_3.5: {self.is_qwen35_model})")
 
     def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
         """Prepare message content for Qwen models."""
@@ -1776,9 +1794,23 @@ class QwenLLM(OpenAILLM):
         return self.client.chat.completions.create(**api_params)
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
-        """Handle API response with Qwen-specific parsing."""
-        # Calculate cost (same as base)
-        if hasattr(response, "usage") and response.usage:
+        """Handle API response with Qwen-specific parsing.
+
+        For Qwen3.5+: server-side --reasoning-parser and --tool-call-parser handle parsing,
+        so we use standard OpenAI handling and just capture reasoning_content for visualization.
+        For Qwen3-VL: text-based <tool_call> tag parsing (legacy path).
+        """
+        # Qwen3.5+: standard OpenAI tool_calls + reasoning_content (server-side parsed)
+        if self.is_qwen35_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+
+        # Qwen3-VL / older Qwen: text-based tool call parsing (cost only for OpenAI models)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
             usage = response.usage
             cost = calculate_cost(usage, self.model)
             self.total_cost += cost
@@ -1791,14 +1823,11 @@ class QwenLLM(OpenAILLM):
         message = response.choices[0].message
         assistant_message = message.content if message.content else ""
         
-        # Handle Qwen model special format (text-based tool calls)
-        # Check for tool calls either by content pattern
         has_tool_call_pattern = ("<tool_call>" in assistant_message or "</tool_call>" in assistant_message)
         
         if self.use_tools and assistant_message and has_tool_call_pattern:
             tool_calls = self.parse_text_tool_calls(assistant_message)
             if tool_calls:
-                # Save think content (extract reasoning before tool calls) for visualization
                 if "<tool_call>" in assistant_message:
                     think_part = assistant_message.split("<tool_call>")[0].strip()
                     self.last_think = think_part if think_part else None
@@ -1825,7 +1854,6 @@ class QwenLLM(OpenAILLM):
                     self.messages.append({"role": "user", "content": error_message})
                     return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
         
-        # If no text tool calls, fall back to base implementation (which handles standard tool calls or JSON)
         return super()._handle_api_response(response, attempt, max_attempts)
 
     def parse_text_tool_calls(self, content: str) -> List[Dict[str, Any]]:
@@ -1989,7 +2017,11 @@ class GLMLLM(OpenAILLM):
 
 
 class KimiLLM(OpenAILLM):
-    """Language model client for Moonshot AI Kimi models (OpenAI-compatible)."""
+    """Language model client for Moonshot AI Kimi models (OpenAI-compatible).
+
+    Supports both official API (kimi-k2-turbo-preview, etc.) and self-hosted Kimi-K2.5
+    via SGLang/vLLM with --reasoning-parser kimi_k2 (reasoning_content captured for visualization).
+    """
 
     def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
         if llm_config is None:
@@ -2010,8 +2042,21 @@ class KimiLLM(OpenAILLM):
 
         super().__init__(llm_config, client_type, **kwargs)
 
-        self.is_multimodal = any(tag in self.model.lower() for tag in ["k2.5", "k2-5"])
-        logger.info(f"KimiLLM initialized with model: {self.model} (is_multimodal: {self.is_multimodal})")
+        model_lower = self.model.lower()
+        self.is_multimodal = any(tag in model_lower for tag in ["k2.5", "k2-5"])
+        self.is_k2_5_model = "k2.5" in model_lower or "kimi-k2" in model_lower
+        logger.info(f"KimiLLM initialized with model: {self.model} (is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model})")
+
+    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
+        """Capture reasoning_content for Kimi-K2.5 (SGLang/vLLM with --reasoning-parser kimi_k2)."""
+        if self.is_k2_5_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+        return super()._handle_api_response(response, attempt, max_attempts)
 
 
 class DeepSeekLLM(OpenAILLM):
@@ -2075,8 +2120,8 @@ class DeepSeekLLM(OpenAILLM):
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle DeepSeek response with reasoning_content pass-back for thinking mode."""
-        # Cost tracking
-        if hasattr(response, "usage") and response.usage:
+        # Cost tracking (only for OpenAI GPT models)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
             usage = response.usage
             cost = calculate_cost(usage, self.model)
             self.total_cost += cost
@@ -2295,21 +2340,16 @@ class ClaudeLLM(BaseLLM):
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle Claude API response."""
         # Calculate cost
-        if hasattr(response, "usage"):
+        # Cost tracking only for OpenAI GPT models (skip for Claude/Qwen/GLM/Kimi)
+        if hasattr(response, "usage") and is_openai_priced_model(self.model):
             usage = response.usage
-            # Simplified cost calculation (placeholder)
-            # You might want to implement accurate pricing for Claude models
             input_tokens = getattr(usage, "input_tokens", 0)
             output_tokens = getattr(usage, "output_tokens", 0)
-            
-            # Approximate cost (using Claude 3.5 Sonnet pricing as reference: $3/1M input, $15/1M output)
             cost = (input_tokens / 1_000_000) * 3.00 + (output_tokens / 1_000_000) * 15.00
-            
             self.total_cost += cost
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
             self.api_calls += 1
-            
             logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
 
         # Extract content

@@ -5,14 +5,15 @@
   "controller": {
       "type": "kimi",
       "args": {
-          "model": "kimi-k2-turbo-preview",
-          "base_url": "",
-          "api_key": "[YOUR_API_KEY_HERE]"
+          "model": "MoonshotAI/Kimi-K2.5",
+          "base_url": "http://localhost:8004/v1",
+          "api_key": "EMPTY"
       }
   },
   "sandbox": {
       "client_type": "unified",
       "docker_port": 8084,
-      "max_iterations": 50
+      "max_iterations": 30
   }
 }
+  
