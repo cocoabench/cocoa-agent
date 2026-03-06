@@ -26,6 +26,8 @@ def parse_arguments() -> dict:
                        help="Output directory for results (one JSON file per task)")
     parser.add_argument("--model", type=str,
                        help="Override model name from config")
+    parser.add_argument("--run-all", action="store_true",
+                       help="Run all tasks. By default only run tasks with no result or status 'error'.")
 
     return parser.parse_args()
 
@@ -148,6 +150,25 @@ def main():
         raise ValueError(f"Unknown agent type: {agent_type}")
 
     tasks = load_tasks(args.tasks_dir, use_encrypted=use_encrypted)
+
+    # By default only run tasks with no result or status "error"; use --run-all to run everything
+    if not getattr(args, "run_all", False):
+        output_path = Path(args.output_dir)
+        def should_run(t: Dict[str, Any]) -> bool:
+            task_name = t.get("task_name", "")
+            if not task_name:
+                return True
+            out_file = output_path / f"{task_name}.json"
+            if not out_file.exists():
+                return True
+            try:
+                with open(out_file) as f:
+                    data = json.load(f)
+                return data.get("status") == "error"
+            except Exception:
+                return True
+        tasks = [t for t in tasks if should_run(t)]
+        logger.info(f"Only running tasks with no result or status 'error': {len(tasks)} tasks to run")
 
     for i, task in enumerate(tasks, 1):
         task_name = task.get("task_name", f"task_{i}")
