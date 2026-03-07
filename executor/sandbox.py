@@ -5,6 +5,8 @@ Helper functions for executor operations.
 import time
 import subprocess
 import json
+import os
+import io
 from typing import Any, Dict, Optional
 from pathlib import Path
 import requests
@@ -35,6 +37,48 @@ class SandboxClient:
         self.container_id: Optional[str] = None
         self.task_name: Optional[str] = None
         self.task_dir: Optional[str] = None
+        self.llm_provider = sandbox_config.get("llm_provider") or os.getenv("COCOA_LLM_PROVIDER")
+        self.llm_model = sandbox_config.get("llm_model") or os.getenv("COCOA_LLM_MODEL")
+
+    def _should_compress_for_claude(self) -> bool:
+        provider = (getattr(self, "llm_provider", None) or "").lower()
+        model = (getattr(self, "llm_model", None) or "").lower()
+        return provider == "claude" or "claude" in model
+
+    def _compress_image_bytes_for_claude(self, image_bytes: bytes, max_base64_bytes: int = 5 * 1024 * 1024) -> bytes:
+        if not self._should_compress_for_claude():
+            return image_bytes
+        import base64
+        if len(base64.b64encode(image_bytes)) <= max_base64_bytes:
+            return image_bytes
+        try:
+            from PIL import Image
+        except Exception:
+            logger.warning("PIL not available, cannot compress image for Claude")
+            return image_bytes
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+        except Exception:
+            return image_bytes
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        width, height = img.size
+        max_dim = 1568
+        scale = min(1.0, max_dim / max(width, height)) if max(width, height) > max_dim else 1.0
+        quality = 85
+        data = image_bytes
+        for _ in range(8):
+            new_w = max(1, int(width * scale))
+            new_h = max(1, int(height * scale))
+            resized = img.resize((new_w, new_h)) if (new_w, new_h) != img.size else img
+            buffer = io.BytesIO()
+            resized.save(buffer, format="JPEG", quality=quality, optimize=True)
+            data = buffer.getvalue()
+            if len(base64.b64encode(data)) <= max_base64_bytes:
+                return data
+            scale *= 0.85
+            quality = max(40, quality - 10)
+        return data
 
     def health_check(self) -> bool:
         """Check if the agent server is running."""
@@ -345,8 +389,7 @@ class BrowserSandboxClient(SandboxClient):
             screenshot_data = b""
             for chunk in self.sdk_client.browser.screenshot():
                 screenshot_data += chunk
-            
-            # Encode to base64
+            screenshot_data = self._compress_image_bytes_for_claude(screenshot_data)
             base64_image = base64.b64encode(screenshot_data).decode('utf-8')
             status_message = f"Screenshot taken successfully ({len(screenshot_data)} bytes)"
             return base64_image, status_message
@@ -1890,7 +1933,6 @@ class UnifiedSandboxClient(SandboxClient):
                 if not file_path:
                     raise ValueError("image_read requires 'path' or 'file' parameter")
                 
-                # Download the image file as binary data
                 image_data = b""
                 for chunk in self.sdk_client.file.download_file(path=file_path):
                     image_data += chunk
@@ -1898,7 +1940,7 @@ class UnifiedSandboxClient(SandboxClient):
                 if not image_data:
                     raise ValueError(f"Failed to read image file: {file_path} or file is empty")
                 
-                # Encode to base64
+                image_data = self._compress_image_bytes_for_claude(image_data)
                 base64_image = base64.b64encode(image_data).decode('utf-8')
                 message = f"Successfully read image from {file_path} ({len(image_data)} bytes)"
                 

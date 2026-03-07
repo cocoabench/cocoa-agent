@@ -3,16 +3,17 @@
   "log_level": "DEBUG",
   "use_encrypted_tasks": false,
   "controller": {
-      "type": "qwen",
+      "type": "deepseek",
       "args": {
-          "model": "Qwen/Qwen3.5-122B-A10B",
-          "base_url": "http://localhost:8004/v1",
-          "api_key": "EMPTY"
+          "model": "deepseek-chat",
+          "base_url": "",
+          "api_key": "[YOUR_API_KEY_HERE]",
+          "enable_thinking": true
       }
   },
   "sandbox": {
       "client_type": "unified",
       "docker_port": 8084,
-      "max_iterations": 30
-   }
+      "max_iterations": 50
+  }
 }

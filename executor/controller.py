@@ -300,6 +300,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -362,7 +368,7 @@ Task:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 """
 
 UNIFIED_FEEDBACK_PROMPT_TEMPLATE = """
@@ -602,6 +608,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -671,7 +683,7 @@ To call a tool, use this format:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 
 ## Summary
 Act visually, verify rigorously, and avoid blind exploration. Prefer one extra screenshot + VLM judgement before any ambiguous click.
@@ -843,6 +855,17 @@ OPENAI_PRICING = {
 }
 
 
+def is_openai_priced_model(model_name: str) -> bool:
+    """Return True if the model has known OpenAI pricing (only these get cost tracking/logging)."""
+    model_lower = model_name.lower()
+    if model_lower in OPENAI_PRICING:
+        return True
+    for key in OPENAI_PRICING:
+        if model_lower.startswith(key) or key in model_lower:
+            return True
+    return False
+
+
 def get_model_pricing(model_name: str) -> Dict[str, float | None]:
     """Get pricing for a model, with fallback to closest match.
     
@@ -982,10 +1005,11 @@ class BaseLLM(Controller):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message")
@@ -993,6 +1017,34 @@ class BaseLLM(Controller):
         else:
             # Regular text message
             return prompt
+
+    def _detect_image_media_type(self, img_base64: str) -> str:
+        if not isinstance(img_base64, str) or not img_base64:
+            return "image/png"
+        if img_base64.startswith("data:"):
+            try:
+                header = img_base64.split(",", 1)[0]
+                if ";" in header:
+                    return header.split(";", 1)[0].replace("data:", "") or "image/png"
+            except Exception:
+                return "image/png"
+        import base64
+        prefix = img_base64[:128]
+        if len(prefix) % 4 != 0:
+            prefix += "=" * (4 - (len(prefix) % 4))
+        try:
+            data = base64.b64decode(prefix, validate=False)
+        except Exception:
+            return "image/png"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if data.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            return "image/gif"
+        if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp"
+        return "image/png"
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle API response and parse into action format.
@@ -1255,6 +1307,7 @@ class BaseLLM(Controller):
         self.messages.append(tool_message)
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
     
+
     def _remove_images_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Remove images from a message, keeping only text content.
         
@@ -1381,10 +1434,11 @@ class OpenAILLM(BaseLLM):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message (total size: {sum(len(img) for img in images_base64)} chars)")
@@ -1409,8 +1463,8 @@ class OpenAILLM(BaseLLM):
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle OpenAI API response."""
-        # Calculate and track API cost
-        if hasattr(response, "usage") and response.usage:
+        # Calculate and track API cost (only for OpenAI GPT models with known pricing)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
             usage = response.usage
             cost = calculate_cost(usage, self.model)
             self.total_cost += cost
@@ -1649,12 +1703,19 @@ class OpenAILLM(BaseLLM):
 
 
 class QwenLLM(OpenAILLM):
-    """Language model client for Qwen models (compatible with OpenAI API but with special handling)."""
+    """Language model client for Qwen models (compatible with OpenAI API but with special handling).
+
+    Handles two distinct model families:
+    - Qwen3-VL: text-based tool calling via <tool_call> tags, special prompt templates
+    - Qwen3.5+: standard OpenAI tool calling (server-side --tool-call-parser), reasoning_content support
+    """
 
     def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
         super().__init__(llm_config, client_type, **kwargs)
-        self.is_qwen_vl_model = "qwen3-vl" in self.model.lower() or "qwen3_vl" in self.model.lower()
-        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model})")
+        model_lower = self.model.lower()
+        self.is_qwen_vl_model = "qwen3-vl" in model_lower or "qwen3_vl" in model_lower
+        self.is_qwen35_model = "qwen3.5" in model_lower or "qwen3_5" in model_lower
+        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model}, is_3.5: {self.is_qwen35_model})")
 
     def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
         """Prepare message content for Qwen models."""
@@ -1745,9 +1806,23 @@ class QwenLLM(OpenAILLM):
         return self.client.chat.completions.create(**api_params)
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
-        """Handle API response with Qwen-specific parsing."""
-        # Calculate cost (same as base)
-        if hasattr(response, "usage") and response.usage:
+        """Handle API response with Qwen-specific parsing.
+
+        For Qwen3.5+: server-side --reasoning-parser and --tool-call-parser handle parsing,
+        so we use standard OpenAI handling and just capture reasoning_content for visualization.
+        For Qwen3-VL: text-based <tool_call> tag parsing (legacy path).
+        """
+        # Qwen3.5+: standard OpenAI tool_calls + reasoning_content (server-side parsed)
+        if self.is_qwen35_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+
+        # Qwen3-VL / older Qwen: text-based tool call parsing (cost only for OpenAI models)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
             usage = response.usage
             cost = calculate_cost(usage, self.model)
             self.total_cost += cost
@@ -1760,14 +1835,11 @@ class QwenLLM(OpenAILLM):
         message = response.choices[0].message
         assistant_message = message.content if message.content else ""
         
-        # Handle Qwen model special format (text-based tool calls)
-        # Check for tool calls either by content pattern
         has_tool_call_pattern = ("<tool_call>" in assistant_message or "</tool_call>" in assistant_message)
         
         if self.use_tools and assistant_message and has_tool_call_pattern:
             tool_calls = self.parse_text_tool_calls(assistant_message)
             if tool_calls:
-                # Save think content (extract reasoning before tool calls) for visualization
                 if "<tool_call>" in assistant_message:
                     think_part = assistant_message.split("<tool_call>")[0].strip()
                     self.last_think = think_part if think_part else None
@@ -1794,7 +1866,6 @@ class QwenLLM(OpenAILLM):
                     self.messages.append({"role": "user", "content": error_message})
                     return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
         
-        # If no text tool calls, fall back to base implementation (which handles standard tool calls or JSON)
         return super()._handle_api_response(response, attempt, max_attempts)
 
     def parse_text_tool_calls(self, content: str) -> List[Dict[str, Any]]:
@@ -1931,6 +2002,249 @@ class QwenLLM(OpenAILLM):
                             logger.debug(f"Removed images from old user message at index {i}")
 
 
+class GLMLLM(OpenAILLM):
+    """Language model client for Zhipu AI GLM models (OpenAI-compatible)."""
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set GLM defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://open.bigmodel.cn/api/paas/v4/"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "glm-4-plus"
+
+        # Resolve API key from GLM-specific env vars before falling back to OpenAI logic
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            glm_key = os.getenv("ZHIPUAI_API_KEY") or os.getenv("GLM_API_KEY")
+            if glm_key:
+                llm_config["api_key"] = glm_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        self.is_vl_model = any(tag in self.model.lower() for tag in ["4.6v", "4.5v", "4v-", "-vl"])
+        logger.info(f"GLMLLM initialized with model: {self.model} (is_vl: {self.is_vl_model})")
+
+
+class KimiLLM(OpenAILLM):
+    """Language model client for Moonshot AI Kimi models (OpenAI-compatible).
+
+    Supports both official API (kimi-k2-turbo-preview, etc.) and self-hosted Kimi-K2.5
+    via SGLang/vLLM with --reasoning-parser kimi_k2 (reasoning_content captured for visualization).
+    """
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set Kimi defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://api.moonshot.ai/v1"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "kimi-k2-turbo-preview"
+
+        # Resolve API key from Kimi-specific env vars
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            kimi_key = os.getenv("MOONSHOT_API_KEY") or os.getenv("KIMI_API_KEY")
+            if kimi_key:
+                llm_config["api_key"] = kimi_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        model_lower = self.model.lower()
+        self.is_multimodal = any(tag in model_lower for tag in ["k2.5", "k2-5"])
+        self.is_k2_5_model = "k2.5" in model_lower or "kimi-k2" in model_lower
+        logger.info(f"KimiLLM initialized with model: {self.model} (is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model})")
+
+    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
+        """Capture reasoning_content for Kimi-K2.5 (SGLang/vLLM with --reasoning-parser kimi_k2)."""
+        if self.is_k2_5_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+        return super()._handle_api_response(response, attempt, max_attempts)
+
+
+class DeepSeekLLM(OpenAILLM):
+    """Language model client for DeepSeek models (text-only, with thinking mode support).
+
+    DeepSeek V3.2 does not support image/vision input. This controller:
+    - Filters out image-related tools (browser_screenshot, image_read)
+    - Always strips images from message content
+    - Supports thinking mode with reasoning_content pass-back for multi-step tool reasoning
+    """
+
+    IMAGE_TOOL_NAMES = {"browser_screenshot", "image_read"}
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set DeepSeek defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://api.deepseek.com"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "deepseek-chat"
+
+        # Resolve API key from DeepSeek-specific env var
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            ds_key = os.getenv("DEEPSEEK_API_KEY")
+            if ds_key:
+                llm_config["api_key"] = ds_key
+
+        self.enable_thinking = llm_config.get("enable_thinking", True)
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        # Filter out image-related tools since DeepSeek is text-only
+        if self.tools:
+            self.tools = [
+                t for t in self.tools
+                if t.get("function", {}).get("name") not in self.IMAGE_TOOL_NAMES
+            ]
+
+        logger.info(f"DeepSeekLLM initialized with model: {self.model} (thinking: {self.enable_thinking})")
+
+    def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
+        """DeepSeek is text-only: always return plain text, ignoring any images."""
+        if images_base64:
+            logger.debug(f"DeepSeekLLM: discarding {len(images_base64)} image(s) (text-only model)")
+        return prompt
+
+    def _make_api_call(self) -> Any:
+        """Make DeepSeek API call with optional thinking mode."""
+        api_params = {
+            "model": self.model,
+            "messages": self.messages,
+        }
+        if self.use_tools and self.tools:
+            api_params["tools"] = self.tools
+        if self.enable_thinking:
+            api_params["extra_body"] = {"thinking": {"type": "enabled"}}
+        return self.client.chat.completions.create(**api_params)
+
+    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
+        """Handle DeepSeek response with reasoning_content pass-back for thinking mode."""
+        # Cost tracking (only for OpenAI GPT models)
+        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
+            usage = response.usage
+            cost = calculate_cost(usage, self.model)
+            self.total_cost += cost
+            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
+            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
+            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
+            self.api_calls += 1
+
+            logger.info(
+                f"API call cost: ${cost:.6f} | "
+                f"Tokens: {getattr(usage, 'prompt_tokens', 0)} input, "
+                f"{getattr(usage, 'completion_tokens', 0)} output, "
+                f"{getattr(usage, 'cached_tokens', 0)} cached | "
+                f"Total cost: ${self.total_cost:.6f}"
+            )
+
+        message = response.choices[0].message
+        reasoning_content = getattr(message, "reasoning_content", None)
+
+        # Handle tool calling response
+        if self.use_tools and hasattr(message, "tool_calls") and message.tool_calls:
+            self.last_think = reasoning_content or message.content
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in message.tool_calls
+                ]
+            }
+            # Pass back reasoning_content so the model can continue multi-step reasoning
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            self.messages.append(assistant_msg)
+
+            logger.debug(f"Received {len(message.tool_calls)} tool calls from {self.model}")
+
+            try:
+                parsed_response = self.parse_tool_calls(message.tool_calls)
+                logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                return parsed_response
+            except ValueError as parse_error:
+                logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
+                for tc in message.tool_calls:
+                    tool_call_id = getattr(tc, "id", None)
+                    if tool_call_id:
+                        self.add_tool_message(tool_call_id, f"Error parsing tool call: {str(parse_error)}")
+
+                if attempt >= max_attempts:
+                    return {
+                        "action_type": "error",
+                        "error_message": str(parse_error),
+                        "tool_calls": message.tool_calls
+                    }
+                error_message = (
+                    f"Error parsing tool calls: {str(parse_error)}\n"
+                    f"Please check the tool parameters and try again. "
+                    f"Make sure you only use the parameters documented for each tool."
+                )
+                self.messages.append({"role": "user", "content": error_message})
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+        else:
+            # Regular text response
+            assistant_message = message.content if message.content else ""
+            self.last_think = reasoning_content or assistant_message
+
+            assistant_msg = {"role": "assistant", "content": assistant_message}
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            self.messages.append(assistant_msg)
+
+            logger.debug(f"Received response from {self.model} (length: {len(assistant_message)} chars)")
+
+            try:
+                parsed_response = self.parse_response(assistant_message)
+                logger.debug(f"Parsed response (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
+                return parsed_response
+            except ValueError as parse_error:
+                logger.warning(f"Failed to parse response (attempt {attempt}/{max_attempts}): {parse_error}")
+                if attempt >= max_attempts:
+                    raise
+                correction_prompt = (
+                    "Your previous response did not follow the required format. "
+                    "Always respond with either (a) a tool call, or (b) a JSON object describing the next action."
+                )
+                self.messages.append({"role": "user", "content": correction_prompt})
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+
+    def _cleanup_old_user_message_images(self) -> None:
+        """No-op: DeepSeek never has images in messages."""
+        pass
+
+    def _clear_old_reasoning_content(self) -> None:
+        """Clear reasoning_content from old assistant messages to save bandwidth."""
+        for msg in self.messages:
+            if msg.get("role") == "assistant" and "reasoning_content" in msg:
+                msg["reasoning_content"] = None
+
+    def call(self, prompt: str, images_base64: list = None) -> Dict[str, Any]:
+        """Override call to clear old reasoning_content before new user turns."""
+        self._clear_old_reasoning_content()
+        return super().call(prompt, images_base64)
+
+
 class ClaudeLLM(BaseLLM):
     """Language model client using Anthropic Claude API."""
 
@@ -1999,11 +2313,12 @@ class ClaudeLLM(BaseLLM):
             # Add images first (or text first? Claude documentation says text/image order doesn't matter much but usually alternating)
             # The user example has image first then text.
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png", # Assuming PNG for now
+                        "media_type": media_type,
                         "data": img_base64,
                     }
                 })
@@ -2037,21 +2352,16 @@ class ClaudeLLM(BaseLLM):
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle Claude API response."""
         # Calculate cost
-        if hasattr(response, "usage"):
+        # Cost tracking only for OpenAI GPT models (skip for Claude/Qwen/GLM/Kimi)
+        if hasattr(response, "usage") and is_openai_priced_model(self.model):
             usage = response.usage
-            # Simplified cost calculation (placeholder)
-            # You might want to implement accurate pricing for Claude models
             input_tokens = getattr(usage, "input_tokens", 0)
             output_tokens = getattr(usage, "output_tokens", 0)
-            
-            # Approximate cost (using Claude 3.5 Sonnet pricing as reference: $3/1M input, $15/1M output)
             cost = (input_tokens / 1_000_000) * 3.00 + (output_tokens / 1_000_000) * 15.00
-            
             self.total_cost += cost
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
             self.api_calls += 1
-            
             logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
 
         # Extract content
@@ -2196,6 +2506,47 @@ class ClaudeLLM(BaseLLM):
             for i in range(len(self.messages)):
                 if i != last_user_msg_idx and self.messages[i].get("role") == "user":
                     self.messages[i] = self._remove_images_from_message(self.messages[i])
+
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Get the message history in OpenAI-compatible format."""
+        history = []
+        for msg in self.messages:
+            new_msg = msg.copy()
+            content = msg.get("content")
+            
+            if isinstance(content, list):
+                # Handle list content (Claude format)
+                text_parts = []
+                tool_calls = []
+                has_only_tool_results = True
+                
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                            has_only_tool_results = False
+                        elif item.get("type") == "tool_use":
+                            # Convert tool_use to OpenAI tool_call
+                            tool_calls.append({
+                                "id": item.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": item.get("name"),
+                                    "arguments": json.dumps(item.get("input"))
+                                }
+                            })
+                            has_only_tool_results = False
+                
+                if has_only_tool_results:
+                    continue
+
+                new_msg["content"] = "".join(text_parts)
+                if tool_calls:
+                    new_msg["tool_calls"] = tool_calls
+            
+            history.append(new_msg)
+        return history
 
 
 class GeminiLLM(BaseLLM):

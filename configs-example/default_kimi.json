@@ -3,9 +3,9 @@
   "log_level": "DEBUG",
   "use_encrypted_tasks": false,
   "controller": {
-      "type": "qwen",
+      "type": "kimi",
       "args": {
-          "model": "Qwen/Qwen3.5-122B-A10B",
+          "model": "MoonshotAI/Kimi-K2.5",
           "base_url": "http://localhost:8004/v1",
           "api_key": "EMPTY"
       }
@@ -14,5 +14,6 @@
       "client_type": "unified",
       "docker_port": 8084,
       "max_iterations": 30
-   }
+  }
 }
+  
