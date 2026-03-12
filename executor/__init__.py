@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .logger import setup_logging, get_logger
-from .controller import OpenAILLM, QwenLLM, BaseLLM, Controller, Human, GeminiLLM, ClaudeLLM
+from .controller import (
+    OpenAILLM, QwenLLM, BaseLLM, Controller, Human, GeminiLLM, ClaudeLLM,
+    GLMLLM, KimiLLM, DeepSeekLLM,
+)
 from .sandbox import (
     BrowserSandboxClient,
     UnifiedSandboxClient,
@@ -31,6 +34,9 @@ __all__ = [
     "BaseLLM",
     "GeminiLLM",
     "ClaudeLLM",
+    "GLMLLM",
+    "KimiLLM",
+    "DeepSeekLLM",
     "Controller",
     "Human",
     "BrowserSandboxClient",
@@ -126,6 +132,15 @@ class TaskExecutor:
             elif controller_type == "claude":
                 llm_config = controller_config.get("args", {})
                 controller = ClaudeLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "glm":
+                llm_config = controller_config.get("args", {})
+                controller = GLMLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "kimi":
+                llm_config = controller_config.get("args", {})
+                controller = KimiLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "deepseek":
+                llm_config = controller_config.get("args", {})
+                controller = DeepSeekLLM(llm_config=llm_config, client_type=client_type)
             else:  # Default to OpenAILLM (handles "gpt", "openai", "llm", etc.)
                 llm_config = controller_config.get("args", {})
                 controller = OpenAILLM(llm_config=llm_config, client_type=client_type)
@@ -133,6 +148,26 @@ class TaskExecutor:
             logger.info(f"Controller initialized: {controller_type} (Model: {llm_config.get('model', 'unknown')})")
 
         self.controller = controller
+        if "llm_provider" not in sandbox_config:
+            # Check subclasses before parent classes (isinstance matches parents too)
+            if isinstance(controller, ClaudeLLM):
+                sandbox_config["llm_provider"] = "claude"
+            elif isinstance(controller, GeminiLLM):
+                sandbox_config["llm_provider"] = "gemini"
+            elif isinstance(controller, DeepSeekLLM):
+                sandbox_config["llm_provider"] = "deepseek"
+            elif isinstance(controller, GLMLLM):
+                sandbox_config["llm_provider"] = "glm"
+            elif isinstance(controller, KimiLLM):
+                sandbox_config["llm_provider"] = "kimi"
+            elif isinstance(controller, QwenLLM):
+                sandbox_config["llm_provider"] = "qwen"
+            elif isinstance(controller, OpenAILLM):
+                sandbox_config["llm_provider"] = "openai"
+            else:
+                sandbox_config["llm_provider"] = controller_type if "controller_type" in locals() else "llm"
+        if "llm_model" not in sandbox_config:
+            sandbox_config["llm_model"] = getattr(controller, "model", None)
         if client_type == "unified":
             self.sandbox_client = UnifiedSandboxClient(sandbox_config=sandbox_config)
             logger.info("Using UnifiedSandboxClient (browser + file + code + shell)")

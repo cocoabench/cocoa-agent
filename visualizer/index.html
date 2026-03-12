@@ -491,12 +491,25 @@
         // Update trace display based on currentStep
         function updateTraceDisplay() {
             const container = document.getElementById('traceContainer');
-            if (!visualizationData || !visualizationData.iterations) return;
+            if (!visualizationData) return;
 
             let html = '';
-            let stepCount = 0;
             
-            for (let iterIdx = 0; iterIdx < visualizationData.iterations.length; iterIdx++) {
+            // Show instruction at the beginning
+            if (visualizationData.instruction) {
+                html += `<div class="iteration-block" style="border: 1px solid #58a6ff;">`;
+                html += `<div class="iteration-header" style="color: #58a6ff;">Task Instruction</div>`;
+                html += `<div class="observation-block">`;
+                html += `<div class="observation-content">${escapeHtml(visualizationData.instruction)}</div>`;
+                html += `</div>`;
+                html += `</div>`;
+            }
+
+            if (visualizationData.iterations) {
+                let stepCount = 0;
+                
+                for (let iterIdx = 0; iterIdx < visualizationData.iterations.length; iterIdx++) {
+
                 const iter = visualizationData.iterations[iterIdx];
                 let iterationStarted = false;
                 let thinkShown = false;
@@ -545,6 +558,7 @@
                 if (iterationStarted) {
                     html += `</div>`;
                 }
+            }
             }
 
             // Add eval block if available and we've reached the end
