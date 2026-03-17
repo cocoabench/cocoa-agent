@@ -60,26 +60,41 @@ Expected files:
 - `eval.json` if `test.py` exists and test execution is enabled
 - `README.md` for release smoke runs
 
-## What To Share Publicly
+## How To Configure
 
-Reasonable to share:
+A minimal `.env` looks like this:
 
-- The environment variable names
-- Example commands
-- The fact that OpenClaw uses an OpenAI-compatible API
-- The default smoke task name
+```bash
+OPENCLAW_BASE_URL="https://your-openclaw-endpoint/v1"
+OPENCLAW_API_KEY="your-key"
+OPENCLAW_MODEL="your-model-name"
+```
 
-Do not share:
+You can also provide the key via `OPENAI_API_KEY`.
 
-- Real API keys
-- Private endpoint URLs
-- Internal model aliases if they are not meant to be public
-- Any configuration that could be mistaken for an official benchmark setting
+## How To Run
 
-## Suggested Public Framing
+Run a single task:
 
-For repo release or Twitter, describe this as a direct smoke path:
+```bash
+./scripts/run-openclaw.sh \
+  --task-dir cocoabench-example-tasks/linear-regime-estimation
+```
 
-`task.yaml -> OpenClaw response -> local test.py`
+Run the default smoke task:
 
-That is accurate and avoids overstating benchmark coverage.
+```bash
+./scripts/release-openclaw-smoke.sh
+```
+
+## How To Test
+
+If the task directory contains `test.py`, the scripts run it automatically and write the verdict to `eval.json`.
+
+If you only want the model response and want to skip local evaluation:
+
+```bash
+./scripts/run-openclaw.sh \
+  --task-dir cocoabench-example-tasks/linear-regime-estimation \
+  --skip-test
+```

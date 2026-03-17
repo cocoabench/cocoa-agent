@@ -110,7 +110,7 @@ For a release-oriented smoke run that only proves `task.yaml -> test.py` works e
 ./scripts/release-openclaw-smoke.sh
 ```
 
-By default this uses `cocoabench-example-tasks/linear-regime-estimation`, which is a non-`trader-joe-chip-shopping` plaintext example task.
+By default this uses `cocoabench-example-tasks/linear-regime-estimation`.
 
 Detailed script usage is documented in `scripts/README-openclaw.md`.
 
