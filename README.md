@@ -86,6 +86,34 @@ python inference_main.py \
 #   --output-dir results/
 ```
 
+## OpenClaw Scripts
+
+If you want a minimal OpenClaw entrypoint without Docker or the CocoaAgent executor:
+
+```bash
+cp .env.example .env
+# fill OPENCLAW_BASE_URL / OPENCLAW_API_KEY / OPENCLAW_MODEL
+./scripts/run-openclaw.sh \
+  --task-dir cocoabench-example-tasks/linear-regime-estimation
+```
+
+This path does the following:
+
+1. Reads plaintext `task.yaml`
+2. Sends the instruction directly to OpenClaw via the OpenAI-compatible API
+3. Saves the assistant output to `outputs/.../result.json`
+4. Runs the local `test.py` and saves the verdict to `outputs/.../eval.json`
+
+For a release-oriented smoke run that only proves `task.yaml -> test.py` works end to end:
+
+```bash
+./scripts/release-openclaw-smoke.sh
+```
+
+By default this uses `cocoabench-example-tasks/linear-regime-estimation`, which is a non-`trader-joe-chip-shopping` plaintext example task.
+
+Detailed script usage is documented in `scripts/README-openclaw.md`.
+
 ## Configuration
 
 Edit your config file to customize the agent:
