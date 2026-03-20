@@ -47,6 +47,11 @@ class VisualizationHandler(SimpleHTTPRequestHandler):
                 if "eval" in data:
                     visualization_data["eval"] = data["eval"]
                 
+                # Add instruction if available
+                if "instruction" in data:
+                    visualization_data["instruction"] = data["instruction"]
+
+                
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")

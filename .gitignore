@@ -45,10 +45,12 @@ temp.log
 outputs/*
 outputs-*/*
 trash/*
-
 tasks/*
-
 configs/*
+analysis_results/*
+teleport/
+scripts/*
+
 # dataset files
 cocoa-bench-v0.1/
 *.zip

@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .logger import setup_logging, get_logger
-from .controller import OpenAILLM, QwenLLM, BaseLLM, Controller, Human, GeminiLLM, ClaudeLLM
+from .controller import (
+    OpenAILLM, QwenLLM, BaseLLM, Controller, Human, GeminiLLM, ClaudeLLM,
+    GLMLLM, KimiLLM, DeepSeekLLM,
+    MODEL_PRICING_REGISTRY,
+)
 from .sandbox import (
     BrowserSandboxClient,
     UnifiedSandboxClient,
@@ -31,6 +35,9 @@ __all__ = [
     "BaseLLM",
     "GeminiLLM",
     "ClaudeLLM",
+    "GLMLLM",
+    "KimiLLM",
+    "DeepSeekLLM",
     "Controller",
     "Human",
     "BrowserSandboxClient",
@@ -126,6 +133,15 @@ class TaskExecutor:
             elif controller_type == "claude":
                 llm_config = controller_config.get("args", {})
                 controller = ClaudeLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "glm":
+                llm_config = controller_config.get("args", {})
+                controller = GLMLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "kimi":
+                llm_config = controller_config.get("args", {})
+                controller = KimiLLM(llm_config=llm_config, client_type=client_type)
+            elif controller_type == "deepseek":
+                llm_config = controller_config.get("args", {})
+                controller = DeepSeekLLM(llm_config=llm_config, client_type=client_type)
             else:  # Default to OpenAILLM (handles "gpt", "openai", "llm", etc.)
                 llm_config = controller_config.get("args", {})
                 controller = OpenAILLM(llm_config=llm_config, client_type=client_type)
@@ -133,6 +149,26 @@ class TaskExecutor:
             logger.info(f"Controller initialized: {controller_type} (Model: {llm_config.get('model', 'unknown')})")
 
         self.controller = controller
+        if "llm_provider" not in sandbox_config:
+            # Check subclasses before parent classes (isinstance matches parents too)
+            if isinstance(controller, ClaudeLLM):
+                sandbox_config["llm_provider"] = "claude"
+            elif isinstance(controller, GeminiLLM):
+                sandbox_config["llm_provider"] = "gemini"
+            elif isinstance(controller, DeepSeekLLM):
+                sandbox_config["llm_provider"] = "deepseek"
+            elif isinstance(controller, GLMLLM):
+                sandbox_config["llm_provider"] = "glm"
+            elif isinstance(controller, KimiLLM):
+                sandbox_config["llm_provider"] = "kimi"
+            elif isinstance(controller, QwenLLM):
+                sandbox_config["llm_provider"] = "qwen"
+            elif isinstance(controller, OpenAILLM):
+                sandbox_config["llm_provider"] = "openai"
+            else:
+                sandbox_config["llm_provider"] = controller_type if "controller_type" in locals() else "llm"
+        if "llm_model" not in sandbox_config:
+            sandbox_config["llm_model"] = getattr(controller, "model", None)
         if client_type == "unified":
             self.sandbox_client = UnifiedSandboxClient(sandbox_config=sandbox_config)
             logger.info("Using UnifiedSandboxClient (browser + file + code + shell)")
@@ -399,7 +435,42 @@ class TaskExecutor:
         
         # Add API cost statistics if controller supports it
         if hasattr(self.controller, "get_cost_stats"):
-            result_dict["api_cost_stats"] = self.controller.get_cost_stats()
+            api_cost_stats = self.controller.get_cost_stats()
+            result_dict["api_cost_stats"] = api_cost_stats
+
+            try:
+                model = api_cost_stats.get("model", "unknown")
+                total_cost = float(api_cost_stats.get("total_cost_usd", 0.0) or 0.0)
+                input_tokens = api_cost_stats.get("total_input_tokens", 0)
+                cached_tokens = api_cost_stats.get("total_cached_tokens", 0)
+                output_tokens = api_cost_stats.get("total_output_tokens", 0)
+                reasoning_tokens = api_cost_stats.get("total_reasoning_tokens", 0)
+                api_calls = api_cost_stats.get("api_calls", 0)
+                pricing = MODEL_PRICING_REGISTRY.get(str(model).lower(), {})
+
+                per_call = api_cost_stats.get("per_call_costs", [])
+                for idx, call in enumerate(per_call, 1):
+                    c = float(call.get("total_cost_usd", 0))
+                    toks = call.get("tokens", {})
+                    tier = call.get("pricing_tier", "")
+                    logger.debug(
+                        "  call #%d: $%.6f tokens=%s tier=%s", idx, c, toks, tier,
+                    )
+
+                logger.info(
+                    "Task cost summary: model=%s calls=%d total_cost_usd=%.6f "
+                    "input=%s cached=%s output=%s reasoning=%s",
+                    model, api_calls, total_cost,
+                    input_tokens, cached_tokens, output_tokens, reasoning_tokens,
+                )
+                print(
+                    f"[Cost] {model} | calls={api_calls} | "
+                    f"${total_cost:.6f} total | "
+                    f"in={input_tokens} cached={cached_tokens} out={output_tokens} "
+                    f"reasoning={reasoning_tokens} | pricing={pricing}"
+                )
+            except Exception:
+                pass
         
         return result_dict
 
