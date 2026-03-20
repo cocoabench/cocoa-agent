@@ -22,7 +22,12 @@ try:
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    types = Any
+    genai = None
+    class _GeminiTypesStub:
+        """Stub so that type annotations like `types.Tool` don't raise at import time."""
+        def __getattr__(self, name):
+            return Any
+    types = _GeminiTypesStub()
 
 # Try to import Anthropic libraries
 try:
@@ -33,6 +38,222 @@ except ImportError:
     anthropic = Any
 
 logger = get_logger("llm")
+
+
+MODEL_PRICING_REGISTRY = {
+    # Per 1,000,000 tokens, USD
+    "gpt-5.4": {
+        "input": 2.50,
+        "cached_input": 1.25,
+        "output": 15.00,
+    },
+    "claude-opus-4-6": {
+        "input": 5.00,
+        "cache_write": 6.25,
+        "cache_read": 0.50,
+        "output": 25.00,
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.00,
+        "cache_write": 3.75,
+        "cache_read": 0.30,
+        "output": 15.00,
+    },
+    "gemini-3.1-pro-preview": {
+        "input": 2.00,
+        "input_over_200k": 4.00,
+        "cached_input": 0.20,
+        "cached_input_over_200k": 0.40,
+        "output": 12.00,
+        "output_over_200k": 18.00,
+    },
+}
+
+
+class CostTracker:
+    """Provider-specific token parsing + USD cost calculation."""
+
+    TOKENS_PER_MILLION = 1_000_000
+
+    @staticmethod
+    def _norm_model(model_name: str) -> str:
+        return (model_name or "").strip().lower()
+
+    @staticmethod
+    def _get(obj: Any, key: str, default: Any = 0) -> Any:
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    @classmethod
+    def supports_openai(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) in MODEL_PRICING_REGISTRY and "gpt" in cls._norm_model(model_name)
+
+    @classmethod
+    def supports_anthropic(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) in ["claude-opus-4-6", "claude-sonnet-4-6"]
+
+    @classmethod
+    def supports_gemini(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) == "gemini-3.1-pro-preview"
+
+    @classmethod
+    def get_pricing(cls, model_name: str) -> Dict[str, float | None]:
+        model_lower = cls._norm_model(model_name)
+        pricing = MODEL_PRICING_REGISTRY.get(model_lower)
+        if not pricing:
+            raise KeyError(f"No pricing configured for model: {model_name}")
+        return pricing
+
+    @classmethod
+    def track_openai(cls, usage: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_openai(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        # Responses API uses input_tokens/output_tokens;
+        # Chat Completions uses prompt_tokens/completion_tokens.
+        prompt_tokens = cls._get(usage, "input_tokens", None)
+        if prompt_tokens is None:
+            prompt_tokens = cls._get(usage, "prompt_tokens", 0)
+        prompt_tokens = int(prompt_tokens or 0)
+
+        details = cls._get(usage, "input_tokens_details", None) or cls._get(usage, "prompt_tokens_details", None)
+        cached_input_tokens = int(cls._get(details, "cached_tokens", 0) or 0)
+
+        completion_tokens = cls._get(usage, "output_tokens", None)
+        if completion_tokens is None:
+            completion_tokens = cls._get(usage, "completion_tokens", 0)
+        completion_tokens = int(completion_tokens or 0)
+
+        out_details = cls._get(usage, "output_tokens_details", None) or cls._get(usage, "completion_tokens_details", None)
+        reasoning_tokens = int(cls._get(out_details, "reasoning_tokens", 0) or 0)
+
+        uncached_input_tokens = max(prompt_tokens - cached_input_tokens, 0)
+
+        cached_price = float(pricing.get("cached_input", pricing["input"]))
+        cost_input_uncached_usd = (uncached_input_tokens / cls.TOKENS_PER_MILLION) * float(pricing["input"])
+        cost_input_cached_usd = (cached_input_tokens / cls.TOKENS_PER_MILLION) * cached_price
+
+        # reasoning_tokens are already included in completion_tokens — do not double-count.
+        cost_output_usd = (completion_tokens / cls.TOKENS_PER_MILLION) * float(pricing["output"])
+        total_cost_usd = cost_input_uncached_usd + cost_input_cached_usd + cost_output_usd
+
+        return {
+            "provider": "openai",
+            "model": model_name,
+            "tokens": {
+                "prompt_tokens": prompt_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "uncached_input_tokens": uncached_input_tokens,
+                "completion_tokens": completion_tokens,
+                "reasoning_tokens": reasoning_tokens,
+            },
+            "cost_breakdown_usd": {
+                "input_uncached_usd": cost_input_uncached_usd,
+                "input_cached_usd": cost_input_cached_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
+
+    @classmethod
+    def track_anthropic(cls, usage: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_anthropic(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        input_tokens = int(cls._get(usage, "input_tokens", 0) or 0)
+        cache_write_tokens = int(cls._get(usage, "cache_creation_input_tokens", 0) or 0)
+        cache_read_tokens = int(cls._get(usage, "cache_read_input_tokens", 0) or 0)
+        output_tokens = int(cls._get(usage, "output_tokens", 0) or 0)
+
+        logger.debug(
+            "Anthropic raw usage: input=%d cache_write=%d cache_read=%d output=%d",
+            input_tokens, cache_write_tokens, cache_read_tokens, output_tokens,
+        )
+
+        cost_input_usd = (input_tokens / cls.TOKENS_PER_MILLION) * float(pricing["input"])
+        cost_cache_write_usd = (cache_write_tokens / cls.TOKENS_PER_MILLION) * float(pricing["cache_write"])
+        cost_cache_read_usd = (cache_read_tokens / cls.TOKENS_PER_MILLION) * float(pricing["cache_read"])
+        cost_output_usd = (output_tokens / cls.TOKENS_PER_MILLION) * float(pricing["output"])
+        total_cost_usd = cost_input_usd + cost_cache_write_usd + cost_cache_read_usd + cost_output_usd
+
+        return {
+            "provider": "anthropic",
+            "model": model_name,
+            "tokens": {
+                "input_tokens": input_tokens,
+                "cache_write_input_tokens": cache_write_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
+                "output_tokens": output_tokens,
+            },
+            "cost_breakdown_usd": {
+                "input_usd": cost_input_usd,
+                "cache_write_usd": cost_cache_write_usd,
+                "cache_read_usd": cost_cache_read_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
+
+    @classmethod
+    def track_gemini(cls, response: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_gemini(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        usage_metadata = cls._get(response, "usage_metadata", None) or cls._get(response, "usageMetadata", None)
+        if usage_metadata is None:
+            return None
+
+        prompt_token_count = cls._get(usage_metadata, "prompt_token_count", None)
+        if prompt_token_count is None:
+            prompt_token_count = cls._get(usage_metadata, "promptTokenCount", 0)
+
+        cached_content_token_count = cls._get(usage_metadata, "cached_content_token_count", None)
+        if cached_content_token_count is None:
+            cached_content_token_count = cls._get(usage_metadata, "cachedContentTokenCount", 0)
+
+        candidates_token_count = cls._get(usage_metadata, "candidates_token_count", None)
+        if candidates_token_count is None:
+            candidates_token_count = cls._get(usage_metadata, "candidatesTokenCount", 0)
+
+        cached_input_tokens = int(cached_content_token_count or 0)
+        prompt_tokens = int(prompt_token_count or 0)
+        uncached_input_tokens = max(prompt_tokens - cached_input_tokens, 0)
+        output_tokens = int(candidates_token_count or 0)
+
+        # Tiered pricing: >200K context tokens uses the higher tier
+        over_200k = prompt_tokens > 200_000
+        input_price = float(pricing.get("input_over_200k", pricing["input"]) if over_200k else pricing["input"])
+        cached_price = float(pricing.get("cached_input_over_200k", pricing["cached_input"]) if over_200k else pricing["cached_input"])
+        output_price = float(pricing.get("output_over_200k", pricing["output"]) if over_200k else pricing["output"])
+
+        cost_input_uncached_usd = (uncached_input_tokens / cls.TOKENS_PER_MILLION) * input_price
+        cost_input_cached_usd = (cached_input_tokens / cls.TOKENS_PER_MILLION) * cached_price
+        cost_output_usd = (output_tokens / cls.TOKENS_PER_MILLION) * output_price
+        total_cost_usd = cost_input_uncached_usd + cost_input_cached_usd + cost_output_usd
+
+        return {
+            "provider": "gemini",
+            "model": model_name,
+            "tokens": {
+                "prompt_token_count": prompt_tokens,
+                "cached_content_token_count": cached_input_tokens,
+                "uncached_input_tokens": uncached_input_tokens,
+                "candidates_token_count": output_tokens,
+            },
+            "pricing_tier": ">200k" if over_200k else "<=200k",
+            "cost_breakdown_usd": {
+                "input_uncached_usd": cost_input_uncached_usd,
+                "input_cached_usd": cost_input_cached_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
 
 
 def format_tools_as_text(tools: List[Dict[str, Any]]) -> str:
@@ -765,171 +986,6 @@ class Controller:
         return
 
 
-# OpenAI API Pricing (per 1M tokens)
-OPENAI_PRICING = {
-    # Flagship models
-    "gpt-5.2": {
-        "input": 1.750,
-        "cached_input": 0.175,
-        "output": 14.000
-    },
-    "gpt-5.2-pro": {
-        "input": 21.00,
-        "cached_input": None,
-        "output": 168.00
-    },
-    "gpt-5-mini": {
-        "input": 0.250,
-        "cached_input": 0.025,
-        "output": 2.000
-    },
-    # Fine-tuning models
-    "gpt-4.1": {
-        "input": 3.00,
-        "cached_input": 0.75,
-        "output": 12.00
-    },
-    "gpt-4.1-mini": {
-        "input": 0.80,
-        "cached_input": 0.20,
-        "output": 3.20
-    },
-    "gpt-4.1-nano": {
-        "input": 0.20,
-        "cached_input": 0.05,
-        "output": 0.80
-    },
-    "o4-mini": {
-        "input": 4.00,
-        "cached_input": 1.00,
-        "output": 16.00
-    },
-    # Realtime API - Text
-    "gpt-realtime": {
-        "input": 4.00,
-        "cached_input": 0.40,
-        "output": 16.00
-    },
-    "gpt-realtime-mini": {
-        "input": 0.60,
-        "cached_input": 0.06,
-        "output": 2.40
-    },
-    # Image Generation API - Text
-    "gpt-image-1.5": {
-        "input": 5.00,
-        "cached_input": 1.25,
-        "output": 10.00
-    },
-    "gpt-image-1": {
-        "input": 5.00,
-        "cached_input": 1.25,
-        "output": None
-    },
-    "gpt-image-1-mini": {
-        "input": 2.00,
-        "cached_input": 0.20,
-        "output": None
-    },
-    # Legacy models (fallback pricing)
-    "gpt-4o": {
-        "input": 2.50,
-        "cached_input": 0.25,
-        "output": 10.00
-    },
-    "gpt-4o-mini": {
-        "input": 0.15,
-        "cached_input": 0.015,
-        "output": 0.60
-    },
-    "gpt-4-turbo": {
-        "input": 10.00,
-        "cached_input": 1.00,
-        "output": 30.00
-    },
-    "gpt-3.5-turbo": {
-        "input": 0.50,
-        "cached_input": 0.25,
-        "output": 1.50
-    }
-}
-
-
-def is_openai_priced_model(model_name: str) -> bool:
-    """Return True if the model has known OpenAI pricing (only these get cost tracking/logging)."""
-    model_lower = model_name.lower()
-    if model_lower in OPENAI_PRICING:
-        return True
-    for key in OPENAI_PRICING:
-        if model_lower.startswith(key) or key in model_lower:
-            return True
-    return False
-
-
-def get_model_pricing(model_name: str) -> Dict[str, float | None]:
-    """Get pricing for a model, with fallback to closest match.
-    
-    Args:
-        model_name: Model name (e.g., "gpt-5.2", "gpt-4.1")
-        
-    Returns:
-        Dictionary with input, cached_input, and output pricing per 1M tokens
-    """
-    model_lower = model_name.lower()
-    
-    # Direct match
-    if model_lower in OPENAI_PRICING:
-        return OPENAI_PRICING[model_lower]
-    
-    # Try to match by prefix
-    for key, pricing in OPENAI_PRICING.items():
-        if model_lower.startswith(key) or key in model_lower:
-            return pricing
-    
-    # Default fallback to gpt-4.1 pricing
-    logger.warning(f"Unknown model pricing for {model_name}, using gpt-4.1 pricing as fallback")
-    return OPENAI_PRICING.get("gpt-4.1", {"input": 3.00, "cached_input": 0.75, "output": 12.00})
-
-
-def calculate_cost(usage, model_name: str) -> float:
-    """Calculate API cost from usage information.
-    
-    Args:
-        usage: Usage object from OpenAI API response (has prompt_tokens, completion_tokens, total_tokens, cached_tokens)
-        model_name: Model name for pricing lookup
-        
-    Returns:
-        Total cost in USD
-    """
-    pricing = get_model_pricing(model_name)
-    
-    # Get token counts (default to 0 if not present)
-    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-    cached_tokens = getattr(usage, "cached_tokens", 0) or 0
-    
-    # Calculate costs
-    input_cost = 0.0
-    if cached_tokens > 0 and pricing.get("cached_input") is not None:
-        # Use cached pricing for cached tokens
-        input_cost += (cached_tokens / 1_000_000) * pricing["cached_input"]
-        # Use regular input pricing for non-cached tokens
-        non_cached = prompt_tokens - cached_tokens
-        if non_cached > 0 and pricing.get("input") is not None:
-            input_cost += (non_cached / 1_000_000) * pricing["input"]
-    else:
-        # All tokens use regular input pricing
-        if pricing.get("input") is not None:
-            input_cost = (prompt_tokens / 1_000_000) * pricing["input"]
-    
-    output_cost = 0.0
-    if completion_tokens > 0 and pricing.get("output") is not None:
-        output_cost = (completion_tokens / 1_000_000) * pricing["output"]
-    
-    total_cost = input_cost + output_cost
-    return total_cost
-
-
 class BaseLLM(Controller):
     """Base class for LLM controllers with common functionality."""
     
@@ -952,9 +1008,21 @@ class BaseLLM(Controller):
         # Cost tracking
         self.total_cost: float = 0.0
         self.total_input_tokens: int = 0
+        self.total_uncached_input_tokens: int = 0
         self.total_output_tokens: int = 0
         self.total_cached_tokens: int = 0
+        self.total_reasoning_tokens: int = 0
+        self.total_cache_write_input_tokens: int = 0
+        self.total_cache_read_input_tokens: int = 0
+
+        # Cost component tracking (USD)
+        self.total_cost_input_uncached_usd: float = 0.0
+        self.total_cost_input_cached_usd: float = 0.0
+        self.total_cost_output_usd: float = 0.0
+        self.total_cost_cache_write_usd: float = 0.0
+        self.total_cost_cache_read_usd: float = 0.0
         self.api_calls: int = 0
+        self.per_call_costs: list = []
         
         # Store client type and determine tool usage
         self.client_type = client_type
@@ -1260,12 +1328,22 @@ class BaseLLM(Controller):
         """
         return {
             "total_cost_usd": round(self.total_cost, 6),
+            "total_cost_input_uncached_usd": round(self.total_cost_input_uncached_usd, 6),
+            "total_cost_input_cached_usd": round(self.total_cost_input_cached_usd, 6),
+            "total_cost_output_usd": round(self.total_cost_output_usd, 6),
+            "total_cost_cache_write_usd": round(self.total_cost_cache_write_usd, 6),
+            "total_cost_cache_read_usd": round(self.total_cost_cache_read_usd, 6),
             "total_input_tokens": self.total_input_tokens,
+            "total_uncached_input_tokens": self.total_uncached_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "total_cached_tokens": self.total_cached_tokens,
+            "total_reasoning_tokens": self.total_reasoning_tokens,
+            "total_cache_write_input_tokens": self.total_cache_write_input_tokens,
+            "total_cache_read_input_tokens": self.total_cache_read_input_tokens,
             "total_tokens": self.total_input_tokens + self.total_output_tokens,
             "api_calls": self.api_calls,
-            "model": self.model
+            "model": self.model,
+            "per_call_costs": self.per_call_costs,
         }
     
     def reset_cost_tracking(self) -> None:
@@ -1273,9 +1351,21 @@ class BaseLLM(Controller):
         logger.debug("Resetting cost tracking")
         self.total_cost = 0.0
         self.total_input_tokens = 0
+        self.total_uncached_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cached_tokens = 0
+        self.total_reasoning_tokens = 0
+        self.total_cache_write_input_tokens = 0
+        self.total_cache_read_input_tokens = 0
+
+        self.total_cost_input_uncached_usd = 0.0
+        self.total_cost_input_cached_usd = 0.0
+        self.total_cost_output_usd = 0.0
+        self.total_cost_cache_write_usd = 0.0
+        self.total_cost_cache_read_usd = 0.0
+
         self.api_calls = 0
+        self.per_call_costs = []
         self.last_think = None
     
     def get_last_think(self) -> str | None:
@@ -1410,7 +1500,9 @@ class OpenAILLM(BaseLLM):
 
         self.client = OpenAI(**client_kwargs)
         
-        logger.info(f"OpenAILLM initialized with model: {self.model}")
+        self._use_responses_api = isinstance(self.model, str) and self.model.lower() in ["gpt-5.4-pro", "gpt-5.4"]
+
+        logger.info(f"OpenAILLM initialized with model: {self.model} (responses_api={self._use_responses_api})")
         if base_url:
             logger.info(f"Using custom base_url: {base_url}")
         logger.debug(f"API key configured: {bool(api_key)}")
@@ -1447,42 +1539,195 @@ class OpenAILLM(BaseLLM):
             # Regular text message
             return prompt
     
+    def _convert_tools_to_responses_api(self, openai_tools: list) -> list:
+        """Convert Chat Completions tool definitions to Responses API format (flat, no 'function' wrapper)."""
+        responses_tools = []
+        for tool in openai_tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                responses_tools.append({
+                    "type": "function",
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                })
+        return responses_tools
+
+    def _convert_messages_to_responses_input(self) -> list:
+        """Convert Chat-Completions-style self.messages to Responses API input items.
+
+        Mapping:
+          system   -> {"role": "developer", ...}
+          user     -> {"role": "user", ...}  (images: image_url -> input_image)
+          assistant (with tool_calls) -> function_call items
+          assistant (text only) -> {"role": "assistant", ...}
+          tool     -> function_call_output
+        """
+        items: list = []
+        for msg in self.messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            tool_calls = msg.get("tool_calls")
+
+            if role == "system":
+                items.append({
+                    "role": "developer",
+                    "content": content if isinstance(content, str) else str(content or ""),
+                })
+
+            elif role == "user":
+                if isinstance(content, list):
+                    new_parts = []
+                    for part in content:
+                        if not isinstance(part, dict):
+                            continue
+                        if part.get("type") == "text":
+                            new_parts.append({"type": "input_text", "text": part.get("text", "")})
+                        elif part.get("type") == "image_url":
+                            url = part.get("image_url", {}).get("url", "")
+                            new_parts.append({"type": "input_image", "image_url": url})
+                    items.append({"role": "user", "content": new_parts})
+                else:
+                    items.append({"role": "user", "content": str(content or "")})
+
+            elif role == "assistant":
+                if tool_calls:
+                    for tc in tool_calls:
+                        func = tc.get("function", {})
+                        items.append({
+                            "type": "function_call",
+                            "call_id": tc.get("id", ""),
+                            "name": func.get("name", ""),
+                            "arguments": func.get("arguments", "{}"),
+                        })
+                if content:
+                    items.append({
+                        "role": "assistant",
+                        "content": content if isinstance(content, str) else str(content),
+                    })
+
+            elif role == "tool":
+                items.append({
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": content if isinstance(content, str) else str(content or ""),
+                })
+        return items
+
     def _make_api_call(self) -> Any:
-        """Make OpenAI API call."""
-        # Prepare API call parameters
-        api_params = {
-            "model": self.model,
-            "messages": self.messages
-        }
-        
-        # Add tools if in tool calling mode
-        if self.use_tools and self.tools:
-            api_params["tools"] = self.tools
-        
-        return self.client.chat.completions.create(**api_params)
+        if self._use_responses_api:
+            input_items = self._convert_messages_to_responses_input()
+            api_params = {
+                "model": self.model,
+                "input": input_items,
+                "reasoning": {"effort": "high"},
+            }
+            if self.use_tools and self.tools:
+                api_params["tools"] = self._convert_tools_to_responses_api(self.tools)
+            return self.client.responses.create(**api_params)
+        else:
+            api_params = {
+                "model": self.model,
+                "messages": self.messages,
+            }
+            if self.use_tools and self.tools:
+                api_params["tools"] = self.tools
+            return self.client.chat.completions.create(**api_params)
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle OpenAI API response."""
-        # Calculate and track API cost (only for OpenAI GPT models with known pricing)
-        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
-            usage = response.usage
-            cost = calculate_cost(usage, self.model)
-            self.total_cost += cost
-            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            self.api_calls += 1
-            
-            logger.info(
-                f"API call cost: ${cost:.6f} | "
-                f"Tokens: {getattr(usage, 'prompt_tokens', 0)} input, "
-                f"{getattr(usage, 'completion_tokens', 0)} output, "
-                f"{getattr(usage, 'cached_tokens', 0)} cached | "
-                f"Total cost: ${self.total_cost:.6f}"
-            )
+        if hasattr(response, "usage") and response.usage:
+            cost_info = CostTracker.track_openai(response.usage, self.model)
+            if cost_info:
+                cost = float(cost_info["total_cost_usd"])
+                tokens = cost_info["tokens"]
+                breakdown = cost_info["cost_breakdown_usd"]
 
-        message = response.choices[0].message
-        
+                self.total_cost += cost
+                self.total_input_tokens += tokens["prompt_tokens"]
+                self.total_uncached_input_tokens += tokens["uncached_input_tokens"]
+                self.total_output_tokens += tokens["completion_tokens"]
+                self.total_cached_tokens += tokens["cached_input_tokens"]
+                self.total_reasoning_tokens += tokens["reasoning_tokens"]
+
+                self.total_cost_input_uncached_usd += float(breakdown["input_uncached_usd"])
+                self.total_cost_input_cached_usd += float(breakdown["input_cached_usd"])
+                self.total_cost_output_usd += float(breakdown["output_usd"])
+
+                self.api_calls += 1
+                self.per_call_costs.append(cost_info)
+
+                logger.info(
+                    f"API call #{self.api_calls} cost: ${cost:.6f} | "
+                    f"Tokens: {tokens['prompt_tokens']} in, {tokens['completion_tokens']} out, "
+                    f"{tokens['cached_input_tokens']} cached, {tokens['reasoning_tokens']} reasoning | "
+                    f"Running total: ${self.total_cost:.6f}"
+                )
+
+        class MockFunction:
+            def __init__(self, name, arguments):
+                self.name = name
+                self.arguments = arguments
+
+        class MockToolCall:
+            def __init__(self, id, type, function):
+                self.id = id
+                self.type = type
+                self.function = function
+
+        class MockMessage:
+            def __init__(self):
+                self.content = None
+                self.tool_calls = None
+
+        # Detect legacy Chat Completions response format
+        if hasattr(response, 'choices') and response.choices:
+            message = response.choices[0].message
+        else:
+            # Compatibility path for newer Responses API
+            message = MockMessage()
+            
+            # 1. Extract text content (support multiple possible field names)
+            if hasattr(response, 'output_text'):
+                message.content = response.output_text
+            elif hasattr(response, 'content'):
+                message.content = response.content
+            elif hasattr(response, 'text'):
+                message.content = response.text
+            else:
+                # If none exist, try treating `output` as a plain string
+                message.content = getattr(response, 'output', "") if isinstance(getattr(response, 'output', None), str) else None
+
+            # 2. Extract tool calls (support both object and dict variants)
+            raw_output = getattr(response, 'output', [])
+            raw_tool_calls = getattr(response, 'tool_calls', [])
+            
+            # Determine which field contains tool call entries
+            items_to_check = raw_tool_calls if raw_tool_calls else (raw_output if isinstance(raw_output, list) else [])
+            
+            extracted_tools = []
+            for item in items_to_check:
+                # Support SDK returns as either dict or Pydantic-like object
+                is_dict = isinstance(item, dict)
+                item_type = item.get('type', '') if is_dict else getattr(item, 'type', '')
+                
+                # Check whether this item represents a tool/function call
+                if item_type in ['function', 'function_call'] or (is_dict and 'name' in item) or hasattr(item, 'name'):
+                    f_name = item.get('name', '') if is_dict else getattr(item, 'name', '')
+                    f_args = item.get('arguments', '{}') if is_dict else getattr(item, 'arguments', '{}')
+                    
+                    # Use provided call ID, otherwise generate a unique mock ID
+                    tc_id = item.get('call_id', item.get('id', f"call_{id(item)}")) if is_dict else getattr(item, 'call_id', getattr(item, 'id', f"call_{id(item)}"))
+                    
+                    extracted_tools.append(MockToolCall(
+                        id=tc_id, 
+                        type="function", 
+                        function=MockFunction(name=f_name, arguments=f_args)
+                    ))
+            
+            if extracted_tools:
+                message.tool_calls = extracted_tools
+
         # Handle tool calling response (OpenAI format)
         if self.use_tools and hasattr(message, 'tool_calls') and message.tool_calls:
             # Save think content (reasoning before action) for visualization
@@ -1570,7 +1815,7 @@ class OpenAILLM(BaseLLM):
                 })
                 # Retry by making another API call
                 return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
-    
+
     def parse_tool_calls_list(self, tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse a list of tool calls into action format."""
         actions = []
@@ -1654,32 +1899,6 @@ class OpenAILLM(BaseLLM):
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
         # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
-
-    def get_cost_stats(self) -> Dict[str, Any]:
-        """Get API cost and usage statistics."""
-        return {
-            "total_cost_usd": round(self.total_cost, 6),
-            "total_input_tokens": self.total_input_tokens,
-            "total_output_tokens": self.total_output_tokens,
-            "total_cached_tokens": self.total_cached_tokens,
-            "total_tokens": self.total_input_tokens + self.total_output_tokens,
-            "api_calls": self.api_calls,
-            "model": self.model
-        }
-    
-    def reset_cost_tracking(self) -> None:
-        """Reset cost tracking statistics."""
-        logger.debug("Resetting cost tracking")
-        self.total_cost = 0.0
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cached_tokens = 0
-        self.api_calls = 0
-        self.last_think = None
-    
-    def get_last_think(self) -> str | None:
-        """Get the last think/reasoning content for visualization."""
-        return self.last_think
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for OpenAI tool-calling compliance."""
@@ -1821,16 +2040,8 @@ class QwenLLM(OpenAILLM):
                 self.last_think = reasoning_content
             return result
 
-        # Qwen3-VL / older Qwen: text-based tool call parsing (cost only for OpenAI models)
-        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
-            usage = response.usage
-            cost = calculate_cost(usage, self.model)
-            self.total_cost += cost
-            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            self.api_calls += 1
-            logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
+        # Qwen3-VL / older Qwen: text-based tool call parsing.
+        # Per benchmark requirements, we do not track costs for Qwen/DeepSeek/other providers.
 
         message = response.choices[0].message
         assistant_message = message.content if message.content else ""
@@ -2132,23 +2343,7 @@ class DeepSeekLLM(OpenAILLM):
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle DeepSeek response with reasoning_content pass-back for thinking mode."""
-        # Cost tracking (only for OpenAI GPT models)
-        if hasattr(response, "usage") and response.usage and is_openai_priced_model(self.model):
-            usage = response.usage
-            cost = calculate_cost(usage, self.model)
-            self.total_cost += cost
-            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            self.api_calls += 1
-
-            logger.info(
-                f"API call cost: ${cost:.6f} | "
-                f"Tokens: {getattr(usage, 'prompt_tokens', 0)} input, "
-                f"{getattr(usage, 'completion_tokens', 0)} output, "
-                f"{getattr(usage, 'cached_tokens', 0)} cached | "
-                f"Total cost: ${self.total_cost:.6f}"
-            )
+        # Per benchmark requirements, we do not track costs for DeepSeek controller.
 
         message = response.choices[0].message
         reasoning_content = getattr(message, "reasoning_content", None)
@@ -2259,7 +2454,7 @@ class ClaudeLLM(BaseLLM):
             llm_config = {}
 
         # Extract model and api_key from llm_config, with fallback to kwargs and env variables
-        self.model = llm_config.get("model", kwargs.get("model", "claude-3-5-sonnet-20241022"))
+        self.model = llm_config.get("model", kwargs.get("model", "claude-sonnet-4-6"))
         api_key = (
             llm_config.get("api_key") or
             kwargs.get("api_key") or
@@ -2336,33 +2531,58 @@ class ClaudeLLM(BaseLLM):
 
     def _make_api_call(self) -> Any:
         """Make Claude API call."""
-        # Prepare API call parameters
         api_params = {
             "model": self.model,
             "messages": self.messages,
-            "max_tokens": 4096, # Default max tokens
+            "max_tokens": 16000,
+            "cache_control": {"type": "ephemeral"},
         }
-        
-        # Add tools if in tool calling mode
+
         if self.use_tools and self.tools:
             api_params["tools"] = self._convert_openai_tools_to_claude(self.tools)
-        
+
+        if isinstance(self.model, str) and self.model.lower() in ["claude-opus-4-6", "claude-sonnet-4-6"]:
+            api_params["thinking"] = {"type": "adaptive"}
+            api_params["output_config"] = {"effort": "high"}
+
         return self.client.messages.create(**api_params)
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle Claude API response."""
-        # Calculate cost
-        # Cost tracking only for OpenAI GPT models (skip for Claude/Qwen/GLM/Kimi)
-        if hasattr(response, "usage") and is_openai_priced_model(self.model):
-            usage = response.usage
-            input_tokens = getattr(usage, "input_tokens", 0)
-            output_tokens = getattr(usage, "output_tokens", 0)
-            cost = (input_tokens / 1_000_000) * 3.00 + (output_tokens / 1_000_000) * 15.00
-            self.total_cost += cost
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            self.api_calls += 1
-            logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
+        if hasattr(response, "usage") and response.usage:
+            cost_info = CostTracker.track_anthropic(response.usage, self.model)
+            if cost_info:
+                cost = float(cost_info["total_cost_usd"])
+                tokens = cost_info["tokens"]
+                breakdown = cost_info["cost_breakdown_usd"]
+
+                self.total_cost += cost
+                self.total_input_tokens += (
+                    tokens["input_tokens"]
+                    + tokens["cache_write_input_tokens"]
+                    + tokens["cache_read_input_tokens"]
+                )
+                self.total_uncached_input_tokens += tokens["input_tokens"]
+                self.total_output_tokens += tokens["output_tokens"]
+
+                self.total_cache_write_input_tokens += tokens["cache_write_input_tokens"]
+                self.total_cache_read_input_tokens += tokens["cache_read_input_tokens"]
+                self.total_cached_tokens += tokens["cache_write_input_tokens"] + tokens["cache_read_input_tokens"]
+
+                self.total_cost_input_uncached_usd += float(breakdown["input_usd"])
+                self.total_cost_output_usd += float(breakdown["output_usd"])
+                self.total_cost_cache_write_usd += float(breakdown["cache_write_usd"])
+                self.total_cost_cache_read_usd += float(breakdown["cache_read_usd"])
+
+                self.api_calls += 1
+                self.per_call_costs.append(cost_info)
+
+                logger.info(
+                    f"API call #{self.api_calls} cost: ${cost:.6f} | "
+                    f"in={tokens['input_tokens']} cache_w={tokens['cache_write_input_tokens']} "
+                    f"cache_r={tokens['cache_read_input_tokens']} out={tokens['output_tokens']} | "
+                    f"Running total: ${self.total_cost:.6f}"
+                )
 
         # Extract content
         content_blocks = response.content
@@ -2777,6 +2997,29 @@ class GeminiLLM(BaseLLM):
         candidate = response.candidates[0]
         if not candidate.content or not candidate.content.parts:
             raise ValueError("No content parts in Gemini response")
+
+        cost_info = CostTracker.track_gemini(response, self.model)
+        if cost_info:
+            cost = float(cost_info["total_cost_usd"])
+            tokens = cost_info["tokens"]
+            breakdown = cost_info["cost_breakdown_usd"]
+
+            self.total_cost += cost
+            self.total_input_tokens += tokens["prompt_token_count"]
+            self.total_uncached_input_tokens += tokens["uncached_input_tokens"]
+            self.total_output_tokens += tokens["candidates_token_count"]
+            self.total_cached_tokens += tokens["cached_content_token_count"]
+
+            self.total_cost_input_uncached_usd += float(breakdown["input_uncached_usd"])
+            self.total_cost_input_cached_usd += float(breakdown["input_cached_usd"])
+            self.total_cost_output_usd += float(breakdown["output_usd"])
+
+            self.per_call_costs.append(cost_info)
+            logger.info(
+                f"API call #{self.api_calls} cost: ${cost:.6f} ({cost_info.get('pricing_tier','')}) | "
+                f"in={tokens['prompt_token_count']} cached={tokens['cached_content_token_count']} "
+                f"out={tokens['candidates_token_count']} | Running total: ${self.total_cost:.6f}"
+            )
         
         # Check for function calls
         function_calls = []
@@ -2916,40 +3159,6 @@ class GeminiLLM(BaseLLM):
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
         # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
-
-    def get_cost_stats(self) -> Dict[str, Any]:
-        """Get API cost and usage statistics.
-        
-        Returns:
-            Dictionary with cost and token usage information
-        """
-        return {
-            "total_cost_usd": round(self.total_cost, 6),
-            "total_input_tokens": self.total_input_tokens,
-            "total_output_tokens": self.total_output_tokens,
-            "total_cached_tokens": self.total_cached_tokens,
-            "total_tokens": self.total_input_tokens + self.total_output_tokens,
-            "api_calls": self.api_calls,
-            "model": self.model
-        }
-    
-    def reset_cost_tracking(self) -> None:
-        """Reset cost tracking statistics."""
-        logger.debug("Resetting cost tracking")
-        self.total_cost = 0.0
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cached_tokens = 0
-        self.api_calls = 0
-        self.last_think = None
-    
-    def get_last_think(self) -> str | None:
-        """Get the last think/reasoning content for visualization.
-        
-        Returns:
-            The last think content string, or None if not available
-        """
-        return self.last_think
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for Gemini tool-calling compliance."""
