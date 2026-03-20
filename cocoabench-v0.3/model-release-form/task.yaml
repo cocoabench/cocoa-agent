@@ -1,0 +1,13 @@
+instruction: |-
+  Complete this internal model release submission.
+
+  Task portal: https://model-release-form-private.vercel.app/v1
+
+  Using only the downloadable project artifact and portal behavior, determine the correct submission, construct `release_bundle.zip` exactly as required by the artifact guide, submit the form, and follow the review flow to a terminal status.
+
+  Do not use external sources or guessing.
+  Execute the full flow autonomously, without asking for confirmation.
+  Return the release approval token, not the submission receipt token. If review reaches a failed terminal state without issuing an approval token, return `FAILURE-TOKEN`.
+
+  Return only:
+  <answer>APPROVAL-TOKEN</answer>

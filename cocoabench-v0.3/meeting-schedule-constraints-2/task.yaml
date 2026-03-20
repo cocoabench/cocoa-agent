@@ -1,0 +1,34 @@
+instruction: |-
+  **Constraint-Based Meeting Scheduling**
+
+  Use the textual constraints provided in the instruction files to construct a valid schedule for four sessions. You must assign each session a time slot and a room so that all constraints are satisfied.
+  The link of the constraint files are attached in the end of the instruction.
+  **Output Format:**
+
+  Return your answer in the following format with exactly 4 lines, one per session, in order S1, S2, S3, S4:
+
+  ```
+  <answer>
+  S1: <TimeSlot>-<RoomName>-[<CommaSeparatedParticipants>]
+  S2: <TimeSlot>-<RoomName>-[<CommaSeparatedParticipants>]
+  S3: <TimeSlot>-<RoomName>-[<CommaSeparatedParticipants>]
+  S4: <TimeSlot>-<RoomName>-[<CommaSeparatedParticipants>]
+  </answer>
+  ```
+
+  **Example of format only (this is not the solution):**
+
+  ```
+  <answer>
+  S1: Mon-09:00-RoomA-[Alice,Bob]
+  S2: Mon-10:00-RoomB-[Charlie,Diana]
+  S3: Tue-09:00-RoomA-[Alice,Charlie]
+  S4: Tue-10:00-RoomC-[Bob,Diana]
+  </answer>
+  ```
+
+  Each line must follow this exact format (no extra spaces except as shown).
+  You should download the file using wget from the following URL(s):
+  https://raw.githubusercontent.com/benchworld/asset/main/meeting-schedule-constraints-2_event_rules.txt
+  https://raw.githubusercontent.com/benchworld/asset/main/meeting-schedule-constraints-2_people_prefs.txt
+  https://raw.githubusercontent.com/benchworld/asset/main/meeting-schedule-constraints-2_room_constraints.txt

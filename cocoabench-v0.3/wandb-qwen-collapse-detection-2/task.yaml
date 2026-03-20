@@ -1,0 +1,22 @@
+instruction: |-
+  You are given W&B logs from several reinforcement learning runs of LLMs at https://wandb.ai/yipingwanguw/verl_few_shot. Help me identify the Qwen run that shows the strongest **productive expansion**.
+
+  **Productive Expansion Definition:**
+
+  We say a Qwen run exhibits productive expansion if it satisfies all of the following:
+
+  1. Its **average response length** at the end of training is at least **2x** its **average response length** at the beginning of training.
+  2. Its validation score on `val/test_score/simplerl/math500` improves by at least **0.10** from its first recorded value to its best recorded value.
+  3. After reaching its best `val/test_score/simplerl/math500`, it never drops by more than **0.05** below that best value.
+
+  Among all Qwen runs that satisfy the definition above, return the one with the largest improvement in `val/test_score/simplerl/math500` from its first recorded value to its best recorded value.
+
+  **Output Format:**
+
+  ```
+  <answer>Exact Run Name</answer>
+  ```
+
+  **Example:** `<answer>Example-Model-Run-Name</answer>`
+
+  Answer with the run name exactly as it appears in the logs.

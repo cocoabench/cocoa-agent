@@ -1,0 +1,24 @@
+instruction: |-
+  You are given W&B logs from several reinforcement learning runs of LLMs at https://wandb.ai/yipingwanguw/verl_few_shot. Help me identify the Qwen run that shows the best **stable cross-benchmark performance under compression**.
+
+  **Stable Cross-Benchmark Performance Under Compression Definition:**
+
+  We say a Qwen run exhibits stable cross-benchmark performance under compression if it satisfies all of the following:
+
+  1. Its **average response length** at the end of training is no greater than its **average response length** at the beginning of training.
+  2. Its best validation score on `val/test_score/simplerl/math500` reaches at least **0.75**.
+  3. Its best validation score on `val/test_score/simplerl/aime24` reaches at least **0.30**.
+  4. On `val/test_score/simplerl/math500`, it never drops by more than **0.05** from its best recorded value.
+  5. On `val/test_score/simplerl/aime24`, it never drops by more than **0.11** from its best recorded value.
+
+  Among all Qwen runs that satisfy the definition above, return the one with the highest best score on `val/test_score/simplerl/aime24`.
+
+  **Output Format:**
+
+  ```
+  <answer>Exact Run Name</answer>
+  ```
+
+  **Example:** `<answer>Example-Model-Run-Name</answer>`
+
+  Answer with the run name exactly as it appears in the logs.

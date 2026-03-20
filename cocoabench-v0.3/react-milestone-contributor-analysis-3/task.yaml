@@ -1,0 +1,36 @@
+instruction: |-
+  Analyze the **15.0** milestone on GitHub to understand contributor activity patterns.
+  
+  **Milestone URL:** https://github.com/facebook/react/milestone/11?closed=1
+  
+  **Task:**
+  
+  Analyze all **closed issues** in this milestone and answer the following questions:
+  
+  1. **Top Contributor**: Which user created the most issues in this milestone? How many issues did they create? If multiple users are tied, report the one whose username comes first alphabetically (case-insensitive).
+  
+  2. **Most Discussed Issue**: Which issue has the highest number of comments? Report the issue number. If multiple issues are tied, report the one with the lowest issue number.
+  
+  3. **Label Count**: How many issues have the label `Type: Bug`?
+  
+  **Important Notes:**
+  - Only analyze **closed** issues in this milestone
+  - Count issues, not pull requests (though on GitHub they may appear together)
+  - For the "most discussed issue", count the comments shown on the issue page
+  
+  **Output Format:**
+  
+  Submit your answer in the following JSON format:
+  
+  <answer>
+  ```json
+  {
+    "top_contributor": "<username>",
+    "top_contributor_issues": <count>,
+    "most_discussed_issue": <issue_number>,
+    "label_count": <count>
+  }
+  ```
+  </answer>
+  
+  Replace `<username>`, `<count>`, and `<issue_number>` with your findings. The issue number should be an integer without the `#` symbol.

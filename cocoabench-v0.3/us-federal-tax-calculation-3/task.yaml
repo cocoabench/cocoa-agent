@@ -1,0 +1,45 @@
+instruction: |-
+  Calculate the federal income tax for a married couple with multiple income sources using the PriorTax 2024 tax calculator.
+  
+  **Website:** https://priortax.com/tax-calculator/2024/
+  
+  **Taxpayer Information:**
+  
+  - Filing Status: Married Filing Separately
+  - Your Age (on Dec 31, 2024): 40
+  - Spouse Age (on Dec 31, 2024): 62
+  - Valid SSN: Yes (both)
+  - Being claimed as dependent: No (both)
+  - Legally blind: No (both)
+  - Disabled: No (both)
+  - Number of dependents: 0
+  
+  **Income:**
+  
+  - Your W-2 Wages: $132,000
+  - Spouse W-2 Wages: $109,000
+  - Qualified Dividends: $9,500
+  
+  **Deductions & Expenses:**
+  
+  - Charitable Cash Donations: $4,500
+  
+  **Education:**
+  
+  - Student Loan Interest Paid: $1,000
+  
+  **Task:**
+  
+  Navigate to the PriorTax 2024 tax calculator and enter all the information above across the relevant tabs (Personal, Job, Investments, Expenses, Donations, Education). Then find the calculated **Regular Taxes** (Federal income tax) amount.
+  
+  **Note:** You will need to determine whether to use standard deduction or itemized deductions based on which gives a lower tax liability.
+  
+  **Output Format:**
+  
+  Submit only the Federal income tax amount (Regular Taxes):
+  
+  ```
+  <answer>$[amount]</answer>
+  ```
+  
+  Include the dollar sign and round to the nearest dollar (e.g., `<answer>$12,345</answer>`).

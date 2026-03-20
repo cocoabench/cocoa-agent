@@ -1,0 +1,41 @@
+instruction: |-
+  Calculate the federal income tax for an individual with multiple income sources using the PriorTax 2024 tax calculator.
+  
+  **Website:** https://priortax.com/tax-calculator/2024/
+  
+  **Taxpayer Information:**
+  
+  - Filing Status: Single
+  - Your Age (on Dec 31, 2024): 33
+  - Valid SSN: Yes
+  - Being claimed as dependent: No
+  - Legally blind: No
+  - Disabled: No
+  - Number of dependents: 0
+  
+  **Income:**
+  
+  - Your W-2 Wages: $102,000
+  - Long-term Capital Gains: $7,700
+  
+  **Deductions & Expenses:**
+  
+  - Mortgage Interest Paid: $12,000
+  - Real Estate Taxes Paid: $3,500
+  - Charitable Cash Donations: $7,000
+  
+  **Task:**
+  
+  Navigate to the PriorTax 2024 tax calculator and enter all the information above across the relevant tabs (Personal, Job, Investments, Expenses, Donations, Education). Then find the calculated **Regular Taxes** (Federal income tax) amount.
+  
+  **Note:** You will need to determine whether to use standard deduction or itemized deductions based on which gives a lower tax liability.
+  
+  **Output Format:**
+  
+  Submit only the Federal income tax amount (Regular Taxes):
+  
+  ```
+  <answer>$[amount]</answer>
+  ```
+  
+  Include the dollar sign and round to the nearest dollar (e.g., `<answer>$12,345</answer>`).

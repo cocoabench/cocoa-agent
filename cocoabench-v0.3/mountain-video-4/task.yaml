@@ -1,0 +1,20 @@
+instruction: |-
+  **Task:**
+  
+  You are given a video at https://www.youtube.com/watch?v=cjZvFY6__qw. Please answer the following questions.
+  
+  1. According to the on-screen subtitles in the video, at what specific time does the main character start to descent from the mountain?
+  2. According to the on-screen subtitles in the video, what is the height of Camp 4?
+  3. According to the on-screen subtitles in the video, when does the main character complete the descent?
+  
+  For Q1, answer with HH:MM (24-hour format); for Q2, answer with the number in meters (e.g., 3059m); for Q3, answer with HH:MM (24-hour format). 
+  
+  Provide all answers on one single line, separated by commas with no spaces. Answers are case-sensitive.
+  
+  **Output Format:**
+  
+  Submit your answer in the following format:
+  
+  ```
+  <answer>q1_time,q2_height,q3_time</answer>
+  ```

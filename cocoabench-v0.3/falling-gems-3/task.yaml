@@ -1,0 +1,22 @@
+instruction: |-
+  You will play Falling Gems at:
+  https://falling-gems.vercel.app/expert
+
+  **Task:**
+
+  Play the game optimally and report the final BLUE score.
+
+  **Rules:**
+  - The gem values are defined by the legend visible in the game UI.
+  - On BLUE turns, you may take only the leftmost or rightmost remaining gem.
+  - RED also takes only the leftmost or rightmost remaining gem on RED turns.
+  - RED plays strategically to maximize RED's outcome, so BLUE must account for optimal RED play.
+  - Continue until all gems are taken.
+
+  Return only BLUE's final score.
+
+  **Output Format:**
+
+  ```
+  <answer>FINAL_BLUE_SCORE</answer>
+  ```

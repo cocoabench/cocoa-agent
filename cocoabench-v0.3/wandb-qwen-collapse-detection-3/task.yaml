@@ -1,0 +1,23 @@
+instruction: |-
+  You are given W&B logs from several reinforcement learning runs of LLMs at https://wandb.ai/yipingwanguw/verl_few_shot. Help me identify the Qwen run that shows the strongest **asymmetric validation instability**.
+
+  **Asymmetric Validation Instability Definition:**
+
+  We say a Qwen run exhibits asymmetric validation instability if it satisfies all of the following:
+
+  1. Its validation score on `val/test_score/simplerl/math500` improves by at least **0.20** from its first recorded value to its best recorded value.
+  2. Its final `critic/rewards/mean` is at least **0.99**.
+  3. On `val/test_score/simplerl/aime24`, it drops by more than **0.20** from its best recorded value.
+  4. On `val/test_score/simplerl/math500`, it never drops by **0.15** or more from its best recorded value.
+
+  Among all Qwen runs that satisfy the definition above, return the one with the largest drop on `val/test_score/simplerl/aime24` from its best recorded value.
+
+  **Output Format:**
+
+  ```
+  <answer>Exact Run Name</answer>
+  ```
+
+  **Example:** `<answer>Example-Model-Run-Name</answer>`
+
+  Answer with the run name exactly as it appears in the logs.
