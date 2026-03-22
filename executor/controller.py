@@ -1318,7 +1318,6 @@ class BaseLLM(Controller):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
     
     def get_cost_stats(self) -> Dict[str, Any]:
         """Get API cost and usage statistics.
@@ -1898,7 +1897,6 @@ class OpenAILLM(BaseLLM):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for OpenAI tool-calling compliance."""
@@ -3158,7 +3156,6 @@ class GeminiLLM(BaseLLM):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for Gemini tool-calling compliance."""

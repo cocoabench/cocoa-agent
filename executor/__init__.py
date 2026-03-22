@@ -193,6 +193,8 @@ class TaskExecutor:
         else:
             raise RuntimeError("Sandbox environment failed to become ready")
         self.controller.clear_history()
+        if hasattr(self.controller, "reset_cost_tracking"):
+            self.controller.reset_cost_tracking()
 
     def cleanup_environment(self) -> None:
         """Clean up the sandbox environment after execution."""
