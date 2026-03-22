@@ -45,6 +45,7 @@ temp.log
 outputs/*
 outputs-*/*
 trash/*
+configs/generated/*
 
 tasks/*
 
