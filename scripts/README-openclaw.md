@@ -1,85 +1,68 @@
 # OpenClaw Script Notes
 
-These scripts implement the lightest OpenClaw evaluation path in this repo:
+This repo keeps two OpenClaw evaluation entrypoints:
 
-1. Read plaintext `task.yaml`
-2. Send the instruction directly to an OpenAI-compatible OpenClaw endpoint
-3. Save the raw result locally
-4. Run local `test.py` if present
+- `scripts/run-openclaw-agent-task.py`
+  Runs one plaintext CocoaBench task through `openclaw agent`, preserves the full session trace, and runs local `test.py` when present.
+- `scripts/run-openclaw-batch-v02.py`
+  Runs encrypted `cocoabench-v0.2` tasks in batch by decrypting each task into its output directory and then invoking the single-task agent runner.
 
-## Files
+## Required local setup
 
-- `scripts/run-openclaw.sh`
-  Runs one task directory end to end.
-- `scripts/release-openclaw-smoke.sh`
-  Runs the default smoke task for repo/release demos.
-- `scripts/direct_openclaw_eval.py`
-  Python helper that performs the API call and local evaluation.
-- `scripts/lib/common.sh`
-  Shared env and input validation helpers.
+OpenClaw should already be configured on the local machine with provider auth profiles. Both runners use the local OpenClaw agent runtime rather than calling `/chat/completions` directly.
 
-## Environment Variables
+## Single-task runner
 
-Required:
-
-- `OPENCLAW_BASE_URL`
-- `OPENCLAW_API_KEY` or `OPENAI_API_KEY`
-- `OPENCLAW_MODEL`
-
-Optional:
-
-- `OPENCLAW_TASK_DIR`
-- `OPENCLAW_MAX_TOKENS`
-- `OPENCLAW_TEMPERATURE`
-- `RELEASE_TASK_DIR`
-- `RELEASE_MAX_TOKENS`
-- `RELEASE_TEMPERATURE`
-
-## How To Configure
-
-A minimal `.env` looks like this:
+Typical invocation:
 
 ```bash
-OPENCLAW_BASE_URL="https://your-openclaw-endpoint/v1"
-OPENCLAW_API_KEY="your-key"
-OPENCLAW_MODEL="your-model-name"
-```
-
-You can also provide the key via `OPENAI_API_KEY`.
-
-## How To Run
-
-Run a single task:
-
-```bash
-./scripts/run-openclaw.sh \
-  --task-dir cocoabench-example-tasks/linear-regime-estimation
-```
-
-Run the default smoke task:
-
-```bash
-./scripts/release-openclaw-smoke.sh
-```
-
-## How To Test
-
-If the task directory contains `test.py`, the scripts run it automatically and write the verdict to `eval.json`.
-
-If you only want the model response and want to skip local evaluation:
-
-```bash
-./scripts/run-openclaw.sh \
+./scripts/run-openclaw-agent-task.py \
   --task-dir cocoabench-example-tasks/linear-regime-estimation \
-  --skip-test
+  --output-dir outputs/agent-linear-gpt54 \
+  --model gpt-5.4 \
+  --thinking-mode high \
+  --timeout-seconds 1800 \
+  --max-steps 50
 ```
 
-## Outputs
+## Batch runner
 
-Each run writes into `outputs/<run-name>-<task>-<timestamp>/`.
+Typical invocation:
 
-Expected files:
+```bash
+./scripts/run-openclaw-batch-v02.py \
+  --model gpt-5.4 \
+  --thinking-mode high
+```
 
+Useful options:
+
+- `--task <name>` to run only a specific v0.2 task. Repeatable.
+- `--limit <n>` to run only the first N discovered tasks.
+- `--rerun-failed` to retry tasks recorded as failed in the existing manifest.
+- `--rerun-completed` to rerun tasks already marked completed.
+- `--skip-test` to skip local `test.py` evaluation.
+
+The batch runner maintains:
+
+- `manifest.json`
+  Per-task status for resume and progress tracking.
+- `summary.json`
+  Aggregated counts across the current batch run.
+
+Each task subdirectory contains:
+
+- `task.yaml`
+- `test.py`
 - `result.json`
-- `eval.json` if `test.py` exists and test execution is enabled
-- `README.md` for release smoke runs
+- `eval.json` if testing is enabled
+- `agent-response.json`
+- `session-trace.jsonl`
+- `runner-summary.json`
+
+## Notes
+
+- `timeout-seconds` is enforced through `openclaw agent --timeout`.
+- `max-steps` is currently recorded as metadata only.
+- The single-task runner records both the requested model and the resolved provider/model name in `result.json`.
+- Batch outputs under `outputs/` are gitignored and should not be committed.
