@@ -7,7 +7,8 @@
       "args": {
           "model": "gemini-3-flash-preview",
           "api_key": "[YOUR_API_KEY_HERE]",
-          "use_v1alpha": false
+          "use_v1alpha": false,
+          "cleanup_old_user_images": false
       }
   },
   "sandbox": {

@@ -1498,10 +1498,17 @@ class OpenAILLM(BaseLLM):
             client_kwargs["base_url"] = base_url
 
         self.client = OpenAI(**client_kwargs)
-        
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
         self._use_responses_api = isinstance(self.model, str) and self.model.lower() in ["gpt-5.4-pro", "gpt-5.4"]
 
         logger.info(f"OpenAILLM initialized with model: {self.model} (responses_api={self._use_responses_api})")
+        logger.info(
+            "OpenAILLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         if base_url:
             logger.info(f"Using custom base_url: {base_url}")
         logger.debug(f"API key configured: {bool(api_key)}")
@@ -1915,8 +1922,31 @@ class OpenAILLM(BaseLLM):
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
     
     def _cleanup_old_user_message_images(self) -> None:
-        """Remove images from old user messages (default implementation: no-op)."""
-        pass
+        """Remove images from old user messages, keeping only the most recent user image turn."""
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("OpenAILLM: keeping images in all user messages (cleanup disabled)")
+            return
+
+        # Find the last user message (should be the one we just added)
+        last_user_msg_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].get("role") == "user":
+                last_user_msg_idx = i
+                break
+
+        # Remove images from all user messages except the last one
+        if last_user_msg_idx is not None:
+            for i in range(len(self.messages)):
+                if i != last_user_msg_idx and self.messages[i].get("role") == "user":
+                    old_content = self.messages[i].get("content", "")
+                    if isinstance(old_content, list):
+                        has_images = any(
+                            isinstance(item, dict) and item.get("type") == "image_url"
+                            for item in old_content
+                        )
+                        if has_images:
+                            self.messages[i] = self._remove_images_from_message(self.messages[i])
+                            logger.debug(f"Removed images from old user message at index {i}")
 
 
 class QwenLLM(OpenAILLM):
@@ -1932,7 +1962,11 @@ class QwenLLM(OpenAILLM):
         model_lower = self.model.lower()
         self.is_qwen_vl_model = "qwen3-vl" in model_lower or "qwen3_vl" in model_lower
         self.is_qwen35_model = "qwen3.5" in model_lower or "qwen3_5" in model_lower
-        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model}, is_3.5: {self.is_qwen35_model})")
+        logger.info(
+            f"QwenLLM initialized with model: {self.model} "
+            f"(is_vl: {self.is_qwen_vl_model}, is_3.5: {self.is_qwen35_model}, "
+            f"cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
 
     def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
         """Prepare message content for Qwen models."""
@@ -2192,6 +2226,10 @@ class QwenLLM(OpenAILLM):
 
     def _cleanup_old_user_message_images(self) -> None:
         """Remove images from old user messages."""
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("QwenLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
@@ -2234,7 +2272,10 @@ class GLMLLM(OpenAILLM):
         super().__init__(llm_config, client_type, **kwargs)
 
         self.is_vl_model = any(tag in self.model.lower() for tag in ["4.6v", "4.5v", "4v-", "-vl"])
-        logger.info(f"GLMLLM initialized with model: {self.model} (is_vl: {self.is_vl_model})")
+        logger.info(
+            f"GLMLLM initialized with model: {self.model} "
+            f"(is_vl: {self.is_vl_model}, cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
 
 
 class KimiLLM(OpenAILLM):
@@ -2266,7 +2307,11 @@ class KimiLLM(OpenAILLM):
         model_lower = self.model.lower()
         self.is_multimodal = any(tag in model_lower for tag in ["k2.5", "k2-5"])
         self.is_k2_5_model = "k2.5" in model_lower or "kimi-k2" in model_lower
-        logger.info(f"KimiLLM initialized with model: {self.model} (is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model})")
+        logger.info(
+            f"KimiLLM initialized with model: {self.model} "
+            f"(is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model}, "
+            f"cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Capture reasoning_content for Kimi-K2.5 (SGLang/vLLM with --reasoning-parser kimi_k2)."""
@@ -2278,164 +2323,6 @@ class KimiLLM(OpenAILLM):
                 self.last_think = reasoning_content
             return result
         return super()._handle_api_response(response, attempt, max_attempts)
-
-
-class DeepSeekLLM(OpenAILLM):
-    """Language model client for DeepSeek models (text-only, with thinking mode support).
-
-    DeepSeek V3.2 does not support image/vision input. This controller:
-    - Filters out image-related tools (browser_screenshot, image_read)
-    - Always strips images from message content
-    - Supports thinking mode with reasoning_content pass-back for multi-step tool reasoning
-    """
-
-    IMAGE_TOOL_NAMES = {"browser_screenshot", "image_read"}
-
-    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
-        if llm_config is None:
-            llm_config = {}
-
-        # Set DeepSeek defaults before parent init
-        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
-            llm_config["base_url"] = "https://api.deepseek.com"
-
-        if not llm_config.get("model") and not kwargs.get("model"):
-            llm_config["model"] = "deepseek-chat"
-
-        # Resolve API key from DeepSeek-specific env var
-        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
-            ds_key = os.getenv("DEEPSEEK_API_KEY")
-            if ds_key:
-                llm_config["api_key"] = ds_key
-
-        self.enable_thinking = llm_config.get("enable_thinking", True)
-
-        super().__init__(llm_config, client_type, **kwargs)
-
-        # Filter out image-related tools since DeepSeek is text-only
-        if self.tools:
-            self.tools = [
-                t for t in self.tools
-                if t.get("function", {}).get("name") not in self.IMAGE_TOOL_NAMES
-            ]
-
-        logger.info(f"DeepSeekLLM initialized with model: {self.model} (thinking: {self.enable_thinking})")
-
-    def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
-        """DeepSeek is text-only: always return plain text, ignoring any images."""
-        if images_base64:
-            logger.debug(f"DeepSeekLLM: discarding {len(images_base64)} image(s) (text-only model)")
-        return prompt
-
-    def _make_api_call(self) -> Any:
-        """Make DeepSeek API call with optional thinking mode."""
-        api_params = {
-            "model": self.model,
-            "messages": self.messages,
-        }
-        if self.use_tools and self.tools:
-            api_params["tools"] = self.tools
-        if self.enable_thinking:
-            api_params["extra_body"] = {"thinking": {"type": "enabled"}}
-        return self.client.chat.completions.create(**api_params)
-
-    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
-        """Handle DeepSeek response with reasoning_content pass-back for thinking mode."""
-        # Per benchmark requirements, we do not track costs for DeepSeek controller.
-
-        message = response.choices[0].message
-        reasoning_content = getattr(message, "reasoning_content", None)
-
-        # Handle tool calling response
-        if self.use_tools and hasattr(message, "tool_calls") and message.tool_calls:
-            self.last_think = reasoning_content or message.content
-
-            assistant_msg = {
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
-            }
-            # Pass back reasoning_content so the model can continue multi-step reasoning
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
-            self.messages.append(assistant_msg)
-
-            logger.debug(f"Received {len(message.tool_calls)} tool calls from {self.model}")
-
-            try:
-                parsed_response = self.parse_tool_calls(message.tool_calls)
-                logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
-                return parsed_response
-            except ValueError as parse_error:
-                logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
-                for tc in message.tool_calls:
-                    tool_call_id = getattr(tc, "id", None)
-                    if tool_call_id:
-                        self.add_tool_message(tool_call_id, f"Error parsing tool call: {str(parse_error)}")
-
-                if attempt >= max_attempts:
-                    return {
-                        "action_type": "error",
-                        "error_message": str(parse_error),
-                        "tool_calls": message.tool_calls
-                    }
-                error_message = (
-                    f"Error parsing tool calls: {str(parse_error)}\n"
-                    f"Please check the tool parameters and try again. "
-                    f"Make sure you only use the parameters documented for each tool."
-                )
-                self.messages.append({"role": "user", "content": error_message})
-                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
-        else:
-            # Regular text response
-            assistant_message = message.content if message.content else ""
-            self.last_think = reasoning_content or assistant_message
-
-            assistant_msg = {"role": "assistant", "content": assistant_message}
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
-            self.messages.append(assistant_msg)
-
-            logger.debug(f"Received response from {self.model} (length: {len(assistant_message)} chars)")
-
-            try:
-                parsed_response = self.parse_response(assistant_message)
-                logger.debug(f"Parsed response (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
-                return parsed_response
-            except ValueError as parse_error:
-                logger.warning(f"Failed to parse response (attempt {attempt}/{max_attempts}): {parse_error}")
-                if attempt >= max_attempts:
-                    raise
-                correction_prompt = (
-                    "Your previous response did not follow the required format. "
-                    "Always respond with either (a) a tool call, or (b) a JSON object describing the next action."
-                )
-                self.messages.append({"role": "user", "content": correction_prompt})
-                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
-
-    def _cleanup_old_user_message_images(self) -> None:
-        """No-op: DeepSeek never has images in messages."""
-        pass
-
-    def _clear_old_reasoning_content(self) -> None:
-        """Clear reasoning_content from old assistant messages to save bandwidth."""
-        for msg in self.messages:
-            if msg.get("role") == "assistant" and "reasoning_content" in msg:
-                msg["reasoning_content"] = None
-
-    def call(self, prompt: str, images_base64: list = None) -> Dict[str, Any]:
-        """Override call to clear old reasoning_content before new user turns."""
-        self._clear_old_reasoning_content()
-        return super().call(prompt, images_base64)
 
 
 class ClaudeLLM(BaseLLM):
@@ -2475,7 +2362,17 @@ class ClaudeLLM(BaseLLM):
             
         self.client = anthropic.Anthropic(**client_kwargs)
 
+        # Set cleanup_old_user_images=false in controller.args to keep all past
+        # user-turn images in history (higher token/cost; default true matches prior behavior).
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
         logger.info(f"ClaudeLLM initialized with model: {self.model}")
+        logger.info(
+            "ClaudeLLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         logger.debug(f"API key configured: {bool(api_key)}")
         logger.debug(f"Client type: {self.client_type}")
         logger.debug(f"Tool calling mode: {self.use_tools}")
@@ -2712,14 +2609,22 @@ class ClaudeLLM(BaseLLM):
         return message
 
     def _cleanup_old_user_message_images(self) -> None:
-        """Remove images from old user messages."""
+        """Remove images from old user messages (except the latest user turn).
+
+        When ``cleanup_old_user_images`` is False, historical images are kept
+        in ``self.messages`` and sent on every API call.
+        """
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("ClaudeLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
             if self.messages[i].get("role") == "user":
                 last_user_msg_idx = i
                 break
-        
+
         if last_user_msg_idx is not None:
             for i in range(len(self.messages)):
                 if i != last_user_msg_idx and self.messages[i].get("role") == "user":
@@ -2800,7 +2705,15 @@ class GeminiLLM(BaseLLM):
         else:
             self.client = genai.Client(api_key=api_key)
 
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
         logger.info(f"GeminiLLM initialized with model: {self.model}")
+        logger.info(
+            "GeminiLLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         logger.debug(f"API key configured: {bool(api_key)}")
         logger.debug(f"Client type: {self.client_type}")
         logger.debug(f"Tool calling mode: {self.use_tools}")
@@ -3205,6 +3118,10 @@ class GeminiLLM(BaseLLM):
         This prevents image accumulation across iterations. Only the current iteration's images
         should be included in the API call.
         """
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("GeminiLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message (should be the one we just added)
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
