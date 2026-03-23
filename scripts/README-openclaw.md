@@ -53,12 +53,19 @@ The batch runner maintains:
 Each task subdirectory contains:
 
 - `task.yaml`
+  Decrypted task instruction used for this run.
 - `test.py`
+  Decrypted local evaluator for this task.
 - `result.json`
-- `eval.json` if testing is enabled
+  Standardized run result, including the final answer, conversation trace, session metadata, and summary metrics such as execution time and tool call count.
+- `eval.json`
+  Output of `test.py`, including pass/fail status and evaluation feedback.
 - `agent-response.json`
+  Structured JSON returned directly by `openclaw agent --json`.
 - `session-trace.jsonl`
+  Full OpenClaw session trace copied from the local session store, including model changes, thinking level changes, assistant messages, and tool activity.
 - `runner-summary.json`
+  Small per-task summary emitted by the batch runner for quick inspection.
 
 ## Notes
 
