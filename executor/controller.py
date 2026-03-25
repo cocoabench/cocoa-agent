@@ -312,6 +312,10 @@ You are a powerful AI agent with access to a comprehensive sandbox environment. 
 Task:
 {instruction}
 
+## Thinking Protocol
+
+Before EVERY action, output a `Thought:` section explaining what you're about to do and why.
+
 ## Available Tools
 
 ### Browser Tools
