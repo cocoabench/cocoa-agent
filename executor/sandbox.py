@@ -18,6 +18,7 @@ from agent_sandbox.browser import (
     Action_MoveTo, Action_MoveRel, Action_Wait, Action_DoubleClick, Action_RightClick,
     Action_DragTo, Action_DragRel, Action_Hotkey, Action_KeyDown, Action_KeyUp
 )
+from agent_sandbox.types.resolution import Resolution
 
 logger = get_logger("sandbox")
 
@@ -39,6 +40,24 @@ class SandboxClient:
         self.task_dir: Optional[str] = None
         self.llm_provider = sandbox_config.get("llm_provider") or os.getenv("COCOA_LLM_PROVIDER")
         self.llm_model = sandbox_config.get("llm_model") or os.getenv("COCOA_LLM_MODEL")
+        self.browser_resolution = sandbox_config.get("browser_resolution")
+
+    def _configure_browser_resolution(self) -> None:
+        """Apply optional browser viewport configuration."""
+        if self.sdk_client is None or not self.browser_resolution:
+            return
+
+        width = self.browser_resolution.get("width")
+        height = self.browser_resolution.get("height")
+        if not isinstance(width, int) or not isinstance(height, int):
+            logger.warning(f"Ignoring invalid browser_resolution config: {self.browser_resolution}")
+            return
+
+        try:
+            self.sdk_client.browser.set_config(resolution=Resolution(width=width, height=height))
+            logger.info(f"Configured browser resolution to {width}x{height}")
+        except Exception as e:
+            logger.warning(f"Failed to configure browser resolution {width}x{height}: {e}")
 
     def _should_compress_for_claude(self) -> bool:
         provider = (getattr(self, "llm_provider", None) or "").lower()
@@ -307,6 +326,7 @@ class BrowserSandboxClient(SandboxClient):
         if self.sdk_client is None:
             self.sdk_client = Sandbox(base_url=self.base_url)
             logger.debug(f"Initialized Sandbox SDK client with base_url: {self.base_url}")
+            self._configure_browser_resolution()
 
     def _construct_browser_action(self, action_data: Dict[str, Any]):
         """Construct a browser action object from action data.
@@ -1694,6 +1714,7 @@ class UnifiedSandboxClient(SandboxClient):
         if self.sdk_client is None:
             self.sdk_client = Sandbox(base_url=self.base_url)
             logger.debug(f"Initialized Sandbox SDK client with base_url: {self.base_url}")
+            self._configure_browser_resolution()
             
             # Create shell session
             try:
