@@ -58,3 +58,8 @@ cocoa-bench-v0.1/
 
 # Exclude local working task
 cocoabench-head/yearly-costco-receipts
+results/
+configs/
+
+# uv
+uv.lock

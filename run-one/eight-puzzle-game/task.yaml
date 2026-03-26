@@ -1,0 +1,33 @@
+instruction: |-
+  You will interact with the 8-puzzle game at the following website:
+  https://8puzzle-game.vercel.app/
+
+  **Task:**
+
+  This is a grounding smoke test, not a puzzle-solving task.
+
+  Your only goal is to use the web interface to click the visible `Check Code` button on the page.
+
+  **Interaction Constraints:**
+  - Do NOT use DOM-based actions such as `dom_mark_elements`, `dom_click`, `dom_type`, `dom_press`, `dom_scroll`, `dom_get_html`, `dom_get_text`, or `dom_query_selector`.
+  - Use coordinate-based browser actions instead.
+  - Prefer this workflow:
+    1. Take a screenshot with `browser_screenshot()`.
+    2. Locate the `Check Code` button visually.
+    3. Click it with `browser_click(x, y)`.
+    4. If needed, verify the result with another screenshot.
+
+  Requirements:
+  1. Navigate to the page.
+  2. Identify the `Check Code` button in the UI.
+  3. Click the `Check Code` button using a coordinate-based browser action.
+  4. After clicking it, finish the task immediately. Do not try to solve the puzzle.
+
+  **Output Format:**
+
+  ```
+  <answer>CLICKED</answer>
+  ```
+
+  Return exactly `<answer>CLICKED</answer>` after you click the button.
+

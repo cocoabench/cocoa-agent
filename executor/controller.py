@@ -3148,6 +3148,10 @@ class GeminiLLM(BaseLLM):
                             logger.debug(f"Removed images from old user message at index {i}")
 
 
+class DeepSeekLLM(BaseLLM):
+    pass
+
+
 class Human(Controller):
     """Human controller that prompts user for manual input."""
 
