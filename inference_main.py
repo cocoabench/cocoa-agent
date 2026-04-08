@@ -174,8 +174,8 @@ def main():
         task_name = task.get("task_name", f"task_{i}")
         logger.info(f"Processing task {i}/{len(tasks)}: {task_name}")
 
-        agent.setup_environment(task)
         try:
+            agent.setup_environment(task)
             result = agent.run_task(task)
 
             # Run test if available
@@ -200,7 +200,10 @@ def main():
             with open(output_file, 'w') as f:
                 json.dump(error_result, f, indent=2)
         finally:
-            agent.cleanup_environment()
+            try:
+                agent.cleanup_environment()
+            except Exception as cleanup_error:
+                logger.error(f"Cleanup failed for task {task_name}: {cleanup_error}")
 
     logger.info(f"Processed {len(tasks)} tasks. Results saved to {args.output_dir}")
 

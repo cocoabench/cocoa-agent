@@ -9,6 +9,7 @@ This module provides a base Controller class and implementations for:
 import os
 import re
 import json
+import time
 import base64
 from typing import Any, Dict, List
 from openai import OpenAI
@@ -936,6 +937,20 @@ Remember:
 </tool_call>
 """
 
+KIMI_RELATIVE_COORDINATE_INSTRUCTION = """
+## Kimi Coordinate Rule
+
+For on-screen browser actions, output normalized relative coordinates instead of absolute pixels.
+
+- For `browser_click(x, y, ...)`, `browser_move_to(x, y)`, and `browser_drag_to(x, y)`:
+  - `x` and `y` MUST be numbers in `[0, 1]`
+  - Interpret them relative to the current screenshot / viewport
+  - Example: screen center is `(0.5, 0.5)`
+  - Do NOT output pixel coordinates like `670` or `830`
+- Use `browser_move_rel` / `browser_drag_rel` only for true relative cursor offsets from the current mouse position
+- Before clicking, estimate coordinates from the screenshot and express them as normalized ratios
+""".strip()
+
 
 class Controller:
     """Base class for controllers that generate actions given a prompt."""
@@ -1031,7 +1046,7 @@ class BaseLLM(Controller):
         # Store client type and determine tool usage
         self.client_type = client_type
         self.use_tools = client_type in ["browser", "file", "code", "jupyter", "shell", "unified"]
-        self.max_parse_retries = max(1, int(llm_config.get("max_parse_retries", 2)))
+        self.max_parse_retries = max(1, int(llm_config.get("max_parse_retries", 5)))
         
         # Load appropriate tools based on client type
         if self.use_tools:
@@ -1167,9 +1182,16 @@ class BaseLLM(Controller):
                 return parsed_response
             except Exception as e:
                 logger.error(f"Error calling LLM API: {e}")
+                # Don't retry deterministic client errors (4xx except 429)
+                status_code = getattr(e, "status_code", None)
+                if status_code is not None and 400 <= status_code < 500 and status_code != 429:
+                    logger.error(f"Non-retryable client error (HTTP {status_code}), raising immediately")
+                    raise
                 if attempt >= max_attempts:
                     raise
-                # Retry logic can be added here if needed
+                sleep_time = min(30 * attempt, 120)
+                logger.info(f"Retrying in {sleep_time}s (attempt {attempt}/{max_attempts})...")
+                time.sleep(sleep_time)
                 continue
         
         raise ValueError("Failed to obtain a valid action after retrying LLM response parsing.")
@@ -1548,6 +1570,79 @@ class OpenAILLM(BaseLLM):
         else:
             # Regular text message
             return prompt
+
+    def _normalize_tool_calls_for_history(self, tool_calls) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """Validate tool calls before storing them in API history.
+
+        Returns a tuple of:
+        - normalized valid tool calls with canonical JSON arguments
+        - invalid tool call metadata for correction prompts
+        """
+        normalized_tool_calls: list[Dict[str, Any]] = []
+        invalid_tool_calls: list[Dict[str, Any]] = []
+
+        for tc in tool_calls:
+            tool_call_id = getattr(tc, "id", None)
+            tool_call_type = getattr(tc, "type", "function")
+            function = getattr(tc, "function", None)
+            tool_name = getattr(function, "name", "") if function else ""
+            raw_arguments = getattr(function, "arguments", "{}") if function else "{}"
+
+            if isinstance(raw_arguments, dict):
+                parsed_arguments = raw_arguments
+            elif isinstance(raw_arguments, str):
+                try:
+                    parsed_arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    invalid_tool_calls.append({
+                        "id": tool_call_id,
+                        "name": tool_name,
+                        "arguments": raw_arguments,
+                        "error": str(exc),
+                    })
+                    continue
+            else:
+                invalid_tool_calls.append({
+                    "id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": raw_arguments,
+                    "error": f"Arguments must be a JSON string or object, got {type(raw_arguments).__name__}",
+                })
+                continue
+
+            if not isinstance(parsed_arguments, dict):
+                invalid_tool_calls.append({
+                    "id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": raw_arguments,
+                    "error": f"Arguments must decode to a JSON object, got {type(parsed_arguments).__name__}",
+                })
+                continue
+
+            normalized_tool_calls.append({
+                "id": tool_call_id,
+                "type": tool_call_type,
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(parsed_arguments, ensure_ascii=False),
+                }
+            })
+
+        return normalized_tool_calls, invalid_tool_calls
+
+    def _build_invalid_tool_call_correction(self, invalid_tool_calls: list[Dict[str, Any]]) -> str:
+        """Create a correction prompt for malformed tool calls."""
+        lines = [
+            "Your previous tool call could not be parsed, so it was not executed.",
+            "Please try again and re-emit the intended tool call using the documented tool-call format only.",
+            "",
+            "Invalid tool calls:",
+        ]
+        for item in invalid_tool_calls:
+            lines.append(
+                f"- {item.get('name') or '<unknown>'}: arguments={item.get('arguments')!r}; error={item.get('error')}"
+            )
+        return "\n".join(lines)
     
     def _convert_tools_to_responses_api(self, openai_tools: list) -> list:
         """Convert Chat Completions tool definitions to Responses API format (flat, no 'function' wrapper)."""
@@ -1742,42 +1837,66 @@ class OpenAILLM(BaseLLM):
         if self.use_tools and hasattr(message, 'tool_calls') and message.tool_calls:
             # Save think content (reasoning before action) for visualization
             self.last_think = message.content if message.content else None
-            
+
+            normalized_tool_calls, invalid_tool_calls = self._normalize_tool_calls_for_history(message.tool_calls)
+
+            if invalid_tool_calls:
+                logger.warning(
+                    f"Rejected {len(invalid_tool_calls)} malformed tool call(s) from {self.model}; "
+                    "they will not be written back to API history."
+                )
+                for invalid_tool_call in invalid_tool_calls:
+                    logger.error(
+                        "Invalid tool call arguments for %s: %r (%s)",
+                        invalid_tool_call.get("name"),
+                        invalid_tool_call.get("arguments"),
+                        invalid_tool_call.get("error"),
+                    )
+
+                if message.content:
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": message.content,
+                    })
+
+                if attempt >= max_attempts:
+                    return {
+                        "action_type": "error",
+                        "error_message": self._build_invalid_tool_call_correction(invalid_tool_calls),
+                    }
+
+                self.messages.append({
+                    "role": "user",
+                    "content": self._build_invalid_tool_call_correction(invalid_tool_calls),
+                })
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+
             self.messages.append({
                 "role": "assistant",
                 "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
+                "tool_calls": normalized_tool_calls,
             })
-            
-            logger.debug(f"Received {len(message.tool_calls)} tool calls from {self.model}")
-            
+
+            logger.debug(f"Received {len(normalized_tool_calls)} tool calls from {self.model}")
+
             try:
-                parsed_response = self.parse_tool_calls(message.tool_calls)
+                parsed_response = self.parse_tool_calls_list(normalized_tool_calls)
                 logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
                 return parsed_response
             except ValueError as parse_error:
                 logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
                 # Add tool messages for each tool_call_id to satisfy OpenAI API requirements
-                for tc in message.tool_calls:
-                    tool_call_id = getattr(tc, "id", None)
+                for tc in normalized_tool_calls:
+                    tool_call_id = tc.get("id")
                     if tool_call_id:
                         error_content = f"Error parsing tool call: {str(parse_error)}"
                         self.add_tool_message(tool_call_id, error_content)
-                
+
                 if attempt >= max_attempts:
                     return {
                         "action_type": "error",
                         "error_message": str(parse_error),
-                        "tool_calls": message.tool_calls
+                        "tool_calls": normalized_tool_calls
                     }
                 # Add error message to conversation and retry
                 error_message = (
@@ -2051,7 +2170,8 @@ class QwenLLM(OpenAILLM):
         # Prepare API call parameters
         api_params = {
             "model": self.model,
-            "messages": self.messages
+            "messages": self.messages,
+            "extra_body": {"reasoning": {"enabled": True}}
         }
         
         # Add tools if in tool calling mode (except for Qwen3-VL text-based tool calls)
@@ -2316,6 +2436,15 @@ class KimiLLM(OpenAILLM):
             f"(is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model}, "
             f"cleanup_old_user_images: {self.cleanup_old_user_images})"
         )
+
+    def build_prompt(self, task_description: str = None, feedback: str = None, conversation_history: list = None) -> str:
+        """Build Kimi prompt with explicit normalized coordinate instructions."""
+        prompt = super().build_prompt(
+            task_description=task_description,
+            feedback=feedback,
+            conversation_history=conversation_history,
+        )
+        return f"{prompt}\n\n{KIMI_RELATIVE_COORDINATE_INSTRUCTION}"
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Capture reasoning_content for Kimi-K2.5 (SGLang/vLLM with --reasoning-parser kimi_k2)."""
@@ -2713,6 +2842,9 @@ class GeminiLLM(BaseLLM):
             llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
         )
 
+        # Thinking configuration
+        self.thinking = llm_config.get("thinking", kwargs.get("thinking", False))
+
         logger.info(f"GeminiLLM initialized with model: {self.model}")
         logger.info(
             "GeminiLLM cleanup_old_user_images=%s (false keeps historical images)",
@@ -2892,13 +3024,22 @@ class GeminiLLM(BaseLLM):
             "contents": contents
         }
         
+        # Build GenerateContentConfig
+        config_kwargs = {}
+
         # Add tools if in tool calling mode
         if self.use_tools and self.tools:
             gemini_tools = self._convert_openai_tools_to_gemini(self.tools)
             if gemini_tools:
-                config = types.GenerateContentConfig(tools=gemini_tools)
-                api_params["config"] = config
-        
+                config_kwargs["tools"] = gemini_tools
+
+        # Add thinking config if enabled
+        if self.thinking:
+            config_kwargs["thinking_config"] = types.ThinkingConfig()
+
+        if config_kwargs:
+            api_params["config"] = types.GenerateContentConfig(**config_kwargs)
+
         response = self.client.models.generate_content(**api_params)
         self.api_calls += 1
         return response
@@ -2939,8 +3080,13 @@ class GeminiLLM(BaseLLM):
         # Check for function calls
         function_calls = []
         text_content = ""
-        
+        think_content = ""
+
         for part in candidate.content.parts:
+            # Capture thinking parts separately
+            if hasattr(part, 'thought') and part.thought and hasattr(part, 'text') and part.text:
+                think_content += part.text
+                continue
             if hasattr(part, 'function_call') and part.function_call:
                 # Extract function call name and args
                 func_call = part.function_call
@@ -2966,7 +3112,7 @@ class GeminiLLM(BaseLLM):
                 text_content += part.text
         
         # Save think content for visualization
-        self.last_think = text_content if text_content else None
+        self.last_think = think_content if think_content else (text_content if text_content else None)
         
         # Handle tool calling response
         if function_calls:

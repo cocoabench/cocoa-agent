@@ -60,6 +60,7 @@ cocoa-bench-v0.1/
 cocoabench-head/yearly-costco-receipts
 results/
 configs/
+.parallel_run/
 
 # uv
 uv.lock

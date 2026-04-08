@@ -1,26 +1,23 @@
 """
 Parallel inference runner for CocoaAgent.
-
-This script partitions tasks across multiple worker processes. Each worker runs
-the existing `inference_main.py` entrypoint with its own sandbox port, so every
-worker can launch an independent Docker-backed sandbox environment safely.
 """
-
-from __future__ import annotations
-
 import argparse
 import json
+import multiprocessing as mp
+import os
 import shutil
+import socket
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
+from queue import Empty
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run CocoaAgent inference in parallel with one worker per sandbox port."
+        description="Run CocoaAgent inference with a multiprocessing worker pool."
     )
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config file")
     parser.add_argument("--tasks-dir", type=str, required=True, help="Directory containing task subdirectories")
@@ -42,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def list_task_dirs(tasks_dir: Path) -> List[Path]:
+def list_task_dirs(tasks_dir: Path) -> list[Path]:
     return sorted(path for path in tasks_dir.iterdir() if path.is_dir())
 
 
@@ -59,14 +56,6 @@ def should_run_task(task_dir: Path, output_dir: Path) -> bool:
         return True
 
 
-def partition_tasks(task_dirs: List[Path], worker_count: int) -> List[List[Path]]:
-    worker_count = max(1, min(worker_count, len(task_dirs)))
-    partitions: List[List[Path]] = [[] for _ in range(worker_count)]
-    for index, task_dir in enumerate(task_dirs):
-        partitions[index % worker_count].append(task_dir)
-    return partitions
-
-
 def ensure_clean_dir(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
@@ -78,12 +67,6 @@ def link_or_copy_task(task_dir: Path, destination: Path) -> None:
         destination.symlink_to(task_dir.resolve(), target_is_directory=True)
     except OSError:
         shutil.copytree(task_dir, destination)
-
-
-def prepare_worker_tasks(task_dirs: Iterable[Path], worker_tasks_dir: Path) -> None:
-    ensure_clean_dir(worker_tasks_dir)
-    for task_dir in task_dirs:
-        link_or_copy_task(task_dir, worker_tasks_dir / task_dir.name)
 
 
 def write_worker_config(config_path: Path, worker_config_path: Path, docker_port: int) -> None:
@@ -98,12 +81,11 @@ def write_worker_config(config_path: Path, worker_config_path: Path, docker_port
 
 
 def build_worker_command(
-    repo_root: Path,
     worker_config_path: Path,
     worker_tasks_dir: Path,
     worker_output_dir: Path,
     model: str | None,
-) -> List[str]:
+) -> list[str]:
     command = [
         sys.executable,
         "inference_main.py",
@@ -120,11 +102,41 @@ def build_worker_command(
     return command
 
 
-def merge_worker_outputs(worker_output_dirs: Iterable[Path], final_output_dir: Path) -> None:
-    final_output_dir.mkdir(parents=True, exist_ok=True)
-    for worker_output_dir in worker_output_dirs:
-        for json_file in sorted(worker_output_dir.glob("*.json")):
-            shutil.copy2(json_file, final_output_dir / json_file.name)
+def is_port_available(port: int, host: str = "0.0.0.0") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def find_available_ports(
+    count: int,
+    start_port: int,
+    host: str = "0.0.0.0",
+    max_scan: int = 10000,
+) -> list[int]:
+    if count < 1:
+        return []
+
+    ports: list[int] = []
+    port = start_port
+    upper_bound = start_port + max_scan
+
+    while len(ports) < count and port < upper_bound:
+        if is_port_available(port, host=host):
+            ports.append(port)
+        port += 1
+
+    if len(ports) < count:
+        raise RuntimeError(
+            f"Unable to find {count} available ports starting from {start_port}. "
+            f"Scanned up to {upper_bound - 1}."
+        )
+
+    return ports
 
 
 def write_statistics(output_dir: Path) -> None:
@@ -138,6 +150,8 @@ def write_statistics(output_dir: Path) -> None:
     grand_total_output = 0
     grand_total_cached = 0
     per_task_costs: list[tuple[str, float, int]] = []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     for json_file in sorted(output_dir.glob("*.json")):
         try:
@@ -164,7 +178,6 @@ def write_statistics(output_dir: Path) -> None:
             print(f"Error reading {json_file}: {exc}", file=sys.stderr)
 
     success_rate = (passed_tasks / total_tasks * 100) if total_tasks > 0 else 0.0
-
     stats_content = (
         f"Total Tasks: {total_tasks}\n"
         f"Passed: {passed_tasks}\n"
@@ -196,9 +209,158 @@ def write_statistics(output_dir: Path) -> None:
         for task_name, task_cost, task_calls in sorted(per_task_costs, key=lambda item: -item[1]):
             stats_content += f"  {task_name}: ${task_cost:.6f} ({task_calls} calls)\n"
 
-    stats_file = output_dir / "statistics.txt"
-    with open(stats_file, "w") as f:
+    with open(output_dir / "statistics.txt", "w") as f:
         f.write(stats_content)
+
+
+@dataclass
+class WorkerSlot:
+    index: int
+
+
+@dataclass
+class TaskRunPaths:
+    task_name: str
+    source_dir: Path
+    run_dir: Path
+    input_dir: Path
+    temp_output_dir: Path
+    log_path: Path
+    config_path: Path
+    docker_port: int
+
+
+def prepare_task_run(task_dir: Path, tasks_root: Path, base_config_path: Path, docker_port: int) -> TaskRunPaths:
+    run_dir = tasks_root / task_dir.name
+    input_dir = run_dir / "input"
+    temp_output_dir = run_dir / "output"
+    log_path = run_dir / "run.log"
+    config_path = run_dir / "config.json"
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ensure_clean_dir(input_dir)
+    ensure_clean_dir(temp_output_dir)
+    link_or_copy_task(task_dir, input_dir / task_dir.name)
+    write_worker_config(base_config_path, config_path, docker_port)
+
+    return TaskRunPaths(
+        task_name=task_dir.name,
+        source_dir=task_dir,
+        run_dir=run_dir,
+        input_dir=input_dir,
+        temp_output_dir=temp_output_dir,
+        log_path=log_path,
+        config_path=config_path,
+        docker_port=docker_port,
+    )
+
+
+def write_fallback_error_result(task: TaskRunPaths, error_message: str) -> Path:
+    output_file = task.temp_output_dir / f"{task.task_name}.json"
+    error_result = {
+        "status": "error",
+        "error": error_message,
+        "task_name": task.task_name,
+    }
+    with open(output_file, "w") as f:
+        json.dump(error_result, f, indent=2)
+    return output_file
+
+
+def run_task_in_worker(
+    slot: WorkerSlot,
+    repo_root: Path,
+    task: TaskRunPaths,
+    model: str | None,
+) -> dict[str, str | int]:
+    command = build_worker_command(
+        worker_config_path=task.config_path,
+        worker_tasks_dir=task.input_dir,
+        worker_output_dir=task.temp_output_dir,
+        model=model,
+    )
+
+    started_at = datetime.now().isoformat(timespec="seconds")
+    with open(task.log_path, "a") as log_file:
+        log_file.write(
+            f"\n==== worker={slot.index} pid={os.getpid()} port={task.docker_port} "
+            f"task={task.task_name} started_at={started_at} ====\n"
+        )
+        log_file.flush()
+        completed = subprocess.run(
+            command,
+            cwd=repo_root,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    output_file = task.temp_output_dir / f"{task.task_name}.json"
+    return_code = completed.returncode
+    if not output_file.exists():
+        output_file = write_fallback_error_result(
+            task,
+            f"inference_main.py exited with code {completed.returncode} without producing {task.task_name}.json",
+        )
+        if return_code == 0:
+            return_code = 1
+
+    finished_at = datetime.now().isoformat(timespec="seconds")
+    return {
+        "event": "finished",
+        "worker_index": str(slot.index),
+        "task_name": task.task_name,
+        "return_code": str(return_code),
+        "log_path": str(task.log_path),
+        "output_file": str(output_file),
+        "finished_at": finished_at,
+    }
+
+
+def worker_main(
+    slot: WorkerSlot,
+    repo_root: Path,
+    model: str | None,
+    task_queue: mp.Queue,
+    result_queue: mp.Queue,
+) -> None:
+    while True:
+        task = task_queue.get()
+        if task is None:
+            return
+
+        result_queue.put(
+            {
+                "event": "started",
+                "worker_index": str(slot.index),
+                "worker_pid": str(os.getpid()),
+                "task_name": task.task_name,
+                "log_path": str(task.log_path),
+                "docker_port": str(task.docker_port),
+            }
+        )
+
+        try:
+            result_queue.put(run_task_in_worker(slot=slot, repo_root=repo_root, task=task, model=model))
+        except Exception as exc:
+            output_file = write_fallback_error_result(task, f"Worker crashed while running task: {exc}")
+            result_queue.put(
+                {
+                    "event": "finished",
+                    "worker_index": str(slot.index),
+                    "task_name": task.task_name,
+                    "return_code": "1",
+                    "log_path": str(task.log_path),
+                    "output_file": str(output_file),
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+
+
+def copy_task_output(task_output_file: Path, final_output_dir: Path) -> None:
+    final_output_dir.mkdir(parents=True, exist_ok=True)
+    if task_output_file.exists():
+        shutil.copy2(task_output_file, final_output_dir / task_output_file.name)
 
 
 def main() -> int:
@@ -231,70 +393,108 @@ def main() -> int:
         return 0
 
     session_dir = work_root / datetime.now().strftime("%Y%m%d-%H%M%S")
-    session_dir.mkdir(parents=True, exist_ok=True)
+    tasks_root = session_dir / "tasks"
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    partitions = partition_tasks(selected_tasks, args.workers)
-    worker_output_dirs: list[Path] = []
-    processes: list[tuple[int, subprocess.Popen[str], Path]] = []
+    worker_count = max(1, min(args.workers, len(selected_tasks)))
+    worker_slots = [WorkerSlot(index=worker_index) for worker_index in range(worker_count)]
+    task_ports = find_available_ports(count=len(selected_tasks), start_port=args.base_port)
+    task_runs = [
+        prepare_task_run(
+            task_dir=task_dir,
+            tasks_root=tasks_root,
+            base_config_path=config_path,
+            docker_port=task_ports[task_index],
+        )
+        for task_index, task_dir in enumerate(selected_tasks)
+    ]
 
-    print(f"Total tasks selected: {len(selected_tasks)}")
-    print(f"Launching {len(partitions)} workers")
+    print(f"Total tasks selected: {len(task_runs)}")
+    print(f"Launching {worker_count} workers")
     print(f"Session directory: {session_dir}")
+    print(f"Allocated task ports from {task_ports[0]} to {task_ports[-1]}")
 
-    for worker_index, worker_tasks in enumerate(partitions):
-        worker_dir = session_dir / f"worker_{worker_index}"
-        worker_tasks_dir = worker_dir / "tasks"
-        worker_output_dir = worker_dir / "output"
-        worker_output_dir.mkdir(parents=True, exist_ok=True)
-        prepare_worker_tasks(worker_tasks, worker_tasks_dir)
+    ctx = mp.get_context("spawn")
+    task_queue: mp.Queue = ctx.Queue()
+    result_queue: mp.Queue = ctx.Queue()
 
-        worker_config_path = worker_dir / "config.json"
-        docker_port = args.base_port + worker_index
-        write_worker_config(config_path, worker_config_path, docker_port)
+    for task in task_runs:
+        task_queue.put(task)
+    for _ in range(worker_count):
+        task_queue.put(None)
 
-        log_path = worker_dir / "worker.log"
-        command = build_worker_command(
-            repo_root=repo_root,
-            worker_config_path=worker_config_path,
-            worker_tasks_dir=worker_tasks_dir,
-            worker_output_dir=worker_output_dir,
-            model=args.model,
+    processes: list[mp.Process] = []
+    for slot in worker_slots:
+        process = ctx.Process(
+            target=worker_main,
+            args=(slot, repo_root, args.model, task_queue, result_queue),
+            name=f"parallel-worker-{slot.index}",
         )
+        process.start()
+        processes.append(process)
+        print(f"[worker {slot.index}] pid={process.pid} ready")
 
-        log_file = open(log_path, "w")
-        process = subprocess.Popen(
-            command,
-            cwd=repo_root,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        log_file.close()
+    completed_tasks = 0
+    completed_task_names: set[str] = set()
+    failed_tasks: list[str] = []
 
-        worker_output_dirs.append(worker_output_dir)
-        processes.append((worker_index, process, log_path))
-        print(
-            f"[worker {worker_index}] pid={process.pid} port={docker_port} "
-            f"tasks={len(worker_tasks)} log={log_path}"
-        )
+    # Workers publish `started` and `finished` events so progress is visible while
+    # results are still being produced into the shared final output directory.
+    while completed_tasks < len(task_runs):
+        try:
+            event = result_queue.get(timeout=1)
+        except Empty:
+            if not any(process.is_alive() for process in processes):
+                print("All workers exited before all tasks finished.", file=sys.stderr)
+                break
+            continue
 
-    failed_workers: list[int] = []
-    for worker_index, process, log_path in processes:
-        return_code = process.wait()
-        if return_code == 0:
-            print(f"[worker {worker_index}] finished successfully")
+        if event["event"] == "started":
+            print(
+                f"[worker {event['worker_index']}] pid={event['worker_pid']} "
+                f"port={event['docker_port']} task={event['task_name']} log={event['log_path']}"
+            )
+            continue
+
+        completed_tasks += 1
+        completed_task_names.add(event["task_name"])
+
+        output_file = Path(event["output_file"])
+        copy_task_output(output_file, output_dir)
+        write_statistics(output_dir)
+
+        if int(event["return_code"]) == 0:
+            print(
+                f"[worker {event['worker_index']}] finished task={event['task_name']} "
+                f"({completed_tasks}/{len(task_runs)})"
+            )
         else:
-            failed_workers.append(worker_index)
-            print(f"[worker {worker_index}] failed with exit code {return_code}. See {log_path}", file=sys.stderr)
+            failed_tasks.append(event["task_name"])
+            print(
+                f"[worker {event['worker_index']}] task={event['task_name']} failed "
+                f"with exit code {event['return_code']}. See {event['log_path']}",
+                file=sys.stderr,
+            )
 
-    merge_worker_outputs(worker_output_dirs, output_dir)
+    for process in processes:
+        process.join()
+
+    crashed_workers = [process.name for process in processes if process.exitcode not in (0, None)]
+    missing_tasks = sorted(task.task_name for task in task_runs if task.task_name not in completed_task_names)
+
     write_statistics(output_dir)
-
-    print(f"Merged results into {output_dir}")
+    print(f"Results written incrementally to {output_dir}")
     print(f"Statistics written to {output_dir / 'statistics.txt'}")
 
-    if failed_workers:
-        print(f"Failed workers: {failed_workers}", file=sys.stderr)
+    if crashed_workers:
+        print(f"Workers crashed unexpectedly: {crashed_workers}", file=sys.stderr)
+    if missing_tasks:
+        print(f"Tasks with no completion event: {missing_tasks}", file=sys.stderr)
+    if failed_tasks:
+        print(f"Failed tasks: {failed_tasks}", file=sys.stderr)
+
+    if crashed_workers or missing_tasks or failed_tasks:
         return 1
     return 0
 
