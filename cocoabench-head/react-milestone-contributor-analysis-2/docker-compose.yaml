@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${TASK_DOCKER_IMAGE_NAME:-react-milestone-task}
+    container_name: ${TASK_DOCKER_CONTAINER_NAME:-react-milestone-sandbox}
+    security_opt:
+      - seccomp=unconfined
+    ports:
+      - "${HOST_PORT:-8084}:8080"
+    stdin_open: true
+    tty: true

@@ -1,5 +1,8 @@
 # Contributing to CocoaBench
 
+
+> **Notice**: We will consider all tasks submitted by March 15, 2026 for inclusion in our paper submission to COLM 2026. We also warmly welcome additional task contributions after that date, as we will continue expanding CocoaBench and hope to include new tasks in future releases.
+
 Thank you for your interest in contributing to CocoaBench! 🎉
 
 We'd love to have your help in building a diverse and challenging benchmark. The best tasks come from real problems you've encountered — if it challenged you, it'll likely challenge AI agents too! Contributors with **3 accepted tasks** are eligible for co-authorship on the CocoaBench paper, which we plan to submit to a top-tier ML conference. We'll work with you through iterative refinement to help get your tasks accepted and ensure they meet benchmark standards. Particularly interesting or creative tasks may count for more at the discretion of project leads.

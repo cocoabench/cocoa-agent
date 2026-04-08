@@ -196,7 +196,7 @@ def main():
         "--tasks-dir",
         type=str,
         default="cocoabench-head",
-        help="Directory containing task subdirectories (default: cocoa-bench-v0.1/)"
+        help="Directory containing task subdirectories (default: cocoabench-v0.2/)"
     )
     
     args = parser.parse_args()

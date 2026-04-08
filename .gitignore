@@ -55,6 +55,8 @@ scripts/*
 cocoa-bench-v0.1/
 *.zip
 
+# local generated assets for plotdigitizer task authoring
+cocoabench-head/plotdigitizer-data-extraction/generated_plotdigitizer_tasks/
 
 # Exclude local working task
 cocoabench-head/yearly-costco-receipts

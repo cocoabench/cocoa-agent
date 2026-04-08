@@ -1,1 +1,0 @@
-# Suggested tool/source: TradingView or an equivalent charting interface using the NYSE listings of Eli Lilly and Novo Nordisk.

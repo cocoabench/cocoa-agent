@@ -19,8 +19,11 @@
 
 ## What's Inside
 
-- **CocoaBench Dataset** — Benchmark tasks designed for agents capable of solving complex tasks by writing code, operating GUI, etc.
+- **CocoaBench Dataset** — Benchmark tasks included directly in this repo: `cocoabench-v0.2/` (stable) and `cocoabench-head/` (community contributions, continuously merged)
 - **CocoaAgent Framework** — Model-agnostic agent executor that equips agents with general tools (browser, terminal, file operations, code interpreter) via [AIO Sandbox](https://github.com/agent-infra/sandbox)
+
+> [!NOTE]
+> `cocoabench-head/` contains community contributions that are continuously merged. For reproducible evaluation, use a stable release like v0.2.
 
 ## Prerequisites
 
@@ -33,14 +36,15 @@
 ### Option A: Use the Dataset Only (with your own agent)
 
 ```bash
-# 1. Download and decrypt
-curl -LO https://cocoabench.github.io/assets/data/cocoa-bench-v0.1.zip
-unzip cocoa-bench-v0.1.zip && rm cocoa-bench-v0.1.zip
-python decrypt.py
+# Browse v0.2 tasks (already in repo)
+ls cocoabench-v0.2/
 
-# 2. Browse tasks
-ls cocoa-bench-v0.1/
+# Decrypt tasks (if encrypted)
+python decrypt.py --tasks-dir cocoabench-v0.2/
 ```
+
+> [!NOTE]
+> v0.1 is still available as a historical archive: `https://cocoabench.github.io/assets/data/cocoa-bench-v0.1.zip`
 
 **Each task directory contains:**
 
@@ -75,10 +79,10 @@ python inference_main.py \
   --tasks-dir cocoabench-example-tasks/ \
   --output-dir results/
 
-# Or run with full dataset (after downloading):
+# Or run with full v0.2 dataset (decryption is handled automatically):
 # python inference_main.py \
 #   --config configs/my-config.json \
-#   --tasks-dir cocoa-bench-v0.1/ \
+#   --tasks-dir cocoabench-v0.2/ \
 #   --output-dir results/
 ```
 
@@ -152,7 +156,7 @@ Results are saved to `results/<task-name>.json` when using the CocoaAgent framew
 We welcome new benchmark tasks! See [contrib/CONTRIBUTING.md](contrib/CONTRIBUTING.md) for guidelines.
 
 > [!IMPORTANT]
-> Please encrypt your task before submitting a PR to keep benchmark data safe.
+> Please encrypt your task before submitting a PR to keep benchmark data safe from being found by the agent.
 
 ## Citation
 
