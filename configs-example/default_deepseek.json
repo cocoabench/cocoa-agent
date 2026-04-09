@@ -3,12 +3,12 @@
   "log_level": "DEBUG",
   "use_encrypted_tasks": false,
   "controller": {
-      "type": "gpt",
+      "type": "deepseek",
       "args": {
-          "model": "gpt-4.1-mini",
+          "model": "deepseek-chat",
           "base_url": "",
           "api_key": "[YOUR_API_KEY_HERE]",
-          "cleanup_old_user_images": false
+          "enable_thinking": true
       }
   },
   "sandbox": {

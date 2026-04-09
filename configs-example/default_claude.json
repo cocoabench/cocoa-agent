@@ -6,7 +6,8 @@
       "type": "claude",
       "args": {
           "model": "claude-sonnet-4-5",
-          "api_key": "[YOUR_API_KEY_HERE]"
+          "api_key": "[YOUR_API_KEY_HERE]",
+          "cleanup_old_user_images": false
       }
   },
   "sandbox": {

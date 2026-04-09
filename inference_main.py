@@ -26,6 +26,8 @@ def parse_arguments() -> dict:
                        help="Output directory for results (one JSON file per task)")
     parser.add_argument("--model", type=str,
                        help="Override model name from config")
+    parser.add_argument("--run-all", action="store_true",
+                       help="Run all tasks. By default only run tasks with no result or status 'error'.")
 
     return parser.parse_args()
 
@@ -149,12 +151,31 @@ def main():
 
     tasks = load_tasks(args.tasks_dir, use_encrypted=use_encrypted)
 
+    # By default only run tasks with no result or status "error"; use --run-all to run everything
+    if not getattr(args, "run_all", False):
+        output_path = Path(args.output_dir)
+        def should_run(t: Dict[str, Any]) -> bool:
+            task_name = t.get("task_name", "")
+            if not task_name:
+                return True
+            out_file = output_path / f"{task_name}.json"
+            if not out_file.exists():
+                return True
+            try:
+                with open(out_file) as f:
+                    data = json.load(f)
+                return data.get("status") == "error"
+            except Exception:
+                return True
+        tasks = [t for t in tasks if should_run(t)]
+        logger.info(f"Only running tasks with no result or status 'error': {len(tasks)} tasks to run")
+
     for i, task in enumerate(tasks, 1):
         task_name = task.get("task_name", f"task_{i}")
         logger.info(f"Processing task {i}/{len(tasks)}: {task_name}")
 
-        agent.setup_environment(task)
         try:
+            agent.setup_environment(task)
             result = agent.run_task(task)
 
             # Run test if available
@@ -179,20 +200,30 @@ def main():
             with open(output_file, 'w') as f:
                 json.dump(error_result, f, indent=2)
         finally:
-            agent.cleanup_environment()
+            try:
+                agent.cleanup_environment()
+            except Exception as cleanup_error:
+                logger.error(f"Cleanup failed for task {task_name}: {cleanup_error}")
 
     logger.info(f"Processed {len(tasks)} tasks. Results saved to {args.output_dir}")
 
-    # Calculate statistics
+    # Calculate statistics + aggregate costs
     total_tasks = 0
     passed_tasks = 0
     error_tasks = 0
     passed_list = []
     error_list = []
-    
+    grand_total_cost = 0.0
+    grand_total_input = 0
+    grand_total_output = 0
+    grand_total_cached = 0
+    per_task_costs = []
+
     output_path = Path(args.output_dir)
     if output_path.exists():
-        for json_file in output_path.glob("*.json"):
+        for json_file in sorted(output_path.glob("*.json")):
+            if json_file.stem == "statistics":
+                continue
             try:
                 with open(json_file, 'r') as f:
                     data = json.load(f)
@@ -203,11 +234,20 @@ def main():
                     elif data.get("eval", {}).get("passed", False) is True:
                         passed_tasks += 1
                         passed_list.append(json_file.stem)
+
+                    cs = data.get("api_cost_stats", {})
+                    task_cost = float(cs.get("total_cost_usd", 0) or 0)
+                    grand_total_cost += task_cost
+                    grand_total_input += int(cs.get("total_input_tokens", 0) or 0)
+                    grand_total_output += int(cs.get("total_output_tokens", 0) or 0)
+                    grand_total_cached += int(cs.get("total_cached_tokens", 0) or 0)
+                    if task_cost > 0:
+                        per_task_costs.append((json_file.stem, task_cost, cs.get("api_calls", 0)))
             except Exception as e:
                 logger.error(f"Error reading {json_file}: {e}")
 
     success_rate = (passed_tasks / total_tasks * 100) if total_tasks > 0 else 0.0
-    
+
     stats_content = (
         f"Total Tasks: {total_tasks}\n"
         f"Passed: {passed_tasks}\n"
@@ -215,7 +255,7 @@ def main():
         f"Errors: {error_tasks}\n"
         f"Success Rate: {success_rate:.2f}%\n"
     )
-    
+
     if passed_list:
         stats_content += "\nPassed Tasks:\n"
         for task_name in sorted(passed_list):
@@ -225,11 +265,32 @@ def main():
         stats_content += "\nError Tasks:\n"
         for task_name in sorted(error_list):
             stats_content += f"  - {task_name}\n"
-    
+
+    stats_content += (
+        f"\n--- Cost Summary ---\n"
+        f"Grand Total Cost: ${grand_total_cost:.6f}\n"
+        f"Total Input Tokens: {grand_total_input}\n"
+        f"Total Output Tokens: {grand_total_output}\n"
+        f"Total Cached Tokens: {grand_total_cached}\n"
+    )
+    if per_task_costs:
+        stats_content += "\nPer-Task Costs:\n"
+        for tname, tcost, tcalls in sorted(per_task_costs, key=lambda x: -x[1]):
+            stats_content += f"  {tname}: ${tcost:.6f} ({tcalls} calls)\n"
+
     stats_file = output_path / "statistics.txt"
     with open(stats_file, 'w') as f:
         f.write(stats_content)
-        
+
+    print(f"\n{'='*60}")
+    print(f"Grand Total Cost: ${grand_total_cost:.6f}")
+    print(f"Input: {grand_total_input}  Output: {grand_total_output}  Cached: {grand_total_cached}")
+    if per_task_costs:
+        print("Per-task breakdown:")
+        for tname, tcost, tcalls in sorted(per_task_costs, key=lambda x: -x[1]):
+            print(f"  {tname}: ${tcost:.6f} ({tcalls} calls)")
+    print(f"{'='*60}")
+
     logger.info(f"Statistics saved to {stats_file}")
 
 
