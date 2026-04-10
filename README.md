@@ -19,11 +19,11 @@
 
 ## What's Inside
 
-- **CocoaBench Dataset** — Benchmark tasks included directly in this repo: `cocoabench-v0.2/` (stable) and `cocoabench-head/` (community contributions, continuously merged)
+- **CocoaBench Dataset** — Benchmark tasks included directly in this repo: `cocoabench-v1.0/` (stable) and `cocoabench-head/` (community contributions, continuously merged)
 - **CocoaAgent Framework** — Model-agnostic agent executor that equips agents with general tools (browser, terminal, file operations, code interpreter) via [AIO Sandbox](https://github.com/agent-infra/sandbox)
 
 > [!NOTE]
-> `cocoabench-head/` contains community contributions that are continuously merged. For reproducible evaluation, use a stable release like v0.2.
+> `cocoabench-head/` contains community contributions that are continuously merged. For reproducible evaluation, use a stable release like v1.0.
 
 ## Prerequisites
 
@@ -36,11 +36,11 @@
 ### Option A: Use the Dataset Only (with your own agent)
 
 ```bash
-# Browse v0.2 tasks (already in repo)
-ls cocoabench-v0.2/
+# Browse v1.0 tasks (already in repo)
+ls cocoabench-v1.0/
 
 # Decrypt tasks (if encrypted)
-python decrypt.py --tasks-dir cocoabench-v0.2/
+python decrypt.py --tasks-dir cocoabench-v1.0/
 ```
 
 > [!NOTE]
@@ -79,10 +79,10 @@ python inference_main.py \
   --tasks-dir cocoabench-example-tasks/ \
   --output-dir results/
 
-# Or run with full v0.2 dataset (decryption is handled automatically):
+# Or run with full v1.0 dataset (decryption is handled automatically):
 # python inference_main.py \
 #   --config configs/my-config.json \
-#   --tasks-dir cocoabench-v0.2/ \
+#   --tasks-dir cocoabench-v1.0/ \
 #   --output-dir results/
 ```
 
@@ -93,7 +93,7 @@ To run tasks in parallel across multiple workers (each with its own Docker sandb
 ```bash
 python parallel_inference.py \
   --config <config_path> \
-  --tasks-dir cocoabench-v0.4/ \
+  --tasks-dir cocoabench-v1.0/ \
   --output-dir <results_dir> \
   --workers 8
 ```

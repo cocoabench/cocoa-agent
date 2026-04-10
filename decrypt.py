@@ -6,7 +6,7 @@ This module provides functions to decrypt task.yaml.enc and test.py.enc
 files either into memory or to disk.
 
 Usage:
-    python decrypt.py                           # Decrypt all tasks in cocoa-bench-v0.1/
+    python decrypt.py                           # Decrypt all tasks in cocoabench-v1.0/
     python decrypt.py --task my-task            # Decrypt a specific task
     python decrypt.py --tasks-dir my-tasks/     # Decrypt all tasks in directory
 """
@@ -195,8 +195,8 @@ def main():
     parser.add_argument(
         "--tasks-dir",
         type=str,
-        default="cocoabench-head",
-        help="Directory containing task subdirectories (default: cocoabench-v0.2/)"
+        default="cocoabench-v1.0",
+        help="Directory containing task subdirectories (default: cocoabench-v1.0/)"
     )
     
     args = parser.parse_args()
