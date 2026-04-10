@@ -42,6 +42,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         .file-selector select {
@@ -52,10 +53,16 @@
             border-radius: 6px;
             font-size: 14px;
             cursor: pointer;
+            max-width: 260px;
         }
 
         .file-selector select:hover {
             border-color: #58a6ff;
+        }
+
+        .file-selector .sep {
+            color: #8b949e;
+            font-size: 14px;
         }
 
         .main-container {
@@ -109,6 +116,78 @@
             font-weight: 600;
             color: #58a6ff;
             border-bottom: 1px solid #30363d;
+        }
+
+        /* Task prompt block at top of trace */
+        .task-prompt-block {
+            margin-bottom: 24px;
+            border: 1px solid #1f6feb;
+            border-radius: 8px;
+            background: #161b22;
+            overflow: hidden;
+        }
+
+        .task-prompt-header {
+            background: #0d419d22;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #58a6ff;
+            border-bottom: 1px solid #1f6feb;
+        }
+
+        .task-section {
+            padding: 14px 16px;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .task-section:last-child {
+            border-bottom: none;
+        }
+
+        .task-section-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #58a6ff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .task-section-content {
+            font-size: 13px;
+            line-height: 1.7;
+            color: #c9d1d9;
+            white-space: pre-wrap;
+        }
+
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .collapsible-header:hover .toggle-icon {
+            color: #58a6ff;
+        }
+
+        .toggle-icon {
+            font-size: 11px;
+            color: #8b949e;
+            transition: transform 0.2s;
+        }
+
+        .collapsible-body {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.25s ease;
+        }
+
+        .collapsible-body.open {
+            max-height: 400px;
+            overflow-y: auto;
         }
 
         .think-block {
@@ -342,9 +421,14 @@
     <div class="header">
         <h1>Agent Visualization</h1>
         <div class="file-selector">
-            <label for="fileSelect">Result File:</label>
-            <select id="fileSelect">
+            <label for="folderSelect">Folder:</label>
+            <select id="folderSelect">
                 <option value="">Loading...</option>
+            </select>
+            <span class="sep">/</span>
+            <label for="fileSelect">File:</label>
+            <select id="fileSelect">
+                <option value="">— select folder first —</option>
             </select>
         </div>
     </div>
@@ -392,23 +476,57 @@
         let isPlaying = false;
         let playInterval = null;
         let playSpeed = 1;
+        let directoryStructure = {};  // { "": [...], "subfolder": [...] }
 
-        // Load available files
+        // Load available files and populate folder selector
         async function loadFileList() {
             try {
                 const response = await fetch('/api/list');
                 const data = await response.json();
-                const select = document.getElementById('fileSelect');
-                select.innerHTML = '<option value="">Select a file...</option>';
-                data.files.forEach(file => {
-                    const option = document.createElement('option');
-                    option.value = file;
-                    option.textContent = file;
-                    select.appendChild(option);
+                directoryStructure = data.structure || {};
+
+                const folderSelect = document.getElementById('folderSelect');
+                folderSelect.innerHTML = '<option value="">— select folder —</option>';
+
+                const folders = Object.keys(directoryStructure).sort((a, b) => {
+                    // Put root ("") first, then alphabetical
+                    if (a === "") return -1;
+                    if (b === "") return 1;
+                    return a.localeCompare(b);
                 });
+
+                folders.forEach(folder => {
+                    const count = directoryStructure[folder].length;
+                    const option = document.createElement('option');
+                    // Use __root__ as sentinel so empty-string folder key doesn't clash with "no selection"
+                    option.value = folder === "" ? "__root__" : folder;
+                    option.textContent = folder === "" ? `(root)  [${count}]` : `${folder}  [${count}]`;
+                    folderSelect.appendChild(option);
+                });
+
+                // If only one folder, auto-select it
+                if (folders.length === 1) {
+                    const sentinel = folders[0] === "" ? "__root__" : folders[0];
+                    folderSelect.value = sentinel;
+                    populateFileSelect(folders[0]);
+                }
             } catch (error) {
                 console.error('Error loading file list:', error);
             }
+        }
+
+        // Populate file selector for chosen folder
+        function populateFileSelect(folder) {
+            const fileSelect = document.getElementById('fileSelect');
+            const files = directoryStructure[folder] || [];
+            fileSelect.innerHTML = '<option value="">— select file —</option>';
+            files.forEach(file => {
+                const option = document.createElement('option');
+                // Value is the relative path used by /api/data
+                option.value = folder ? `${folder}/${file}` : file;
+                option.textContent = file;
+                fileSelect.appendChild(option);
+            });
         }
 
         // Load visualization data
@@ -476,6 +594,77 @@
             return null;
         }
 
+        // Parse the initial prompt into sections: Task (always shown) + rest (collapsible)
+        function renderInitialPrompt(prompt) {
+            if (!prompt) return '';
+
+            // Extract "Task:" section — starts at "Task:" and ends before the next "##" heading or end
+            const taskMatch = prompt.match(/Task:\s*\n([\s\S]*?)(?=\n##|\n---|\nAvailable Tools|$)/i);
+            const taskText = taskMatch ? taskMatch[1].trim() : '';
+
+            // Everything before "Task:" (preamble like "You are a powerful AI agent...")
+            const preambleMatch = prompt.match(/^([\s\S]*?)(?=Task:)/i);
+            const preamble = preambleMatch ? preambleMatch[1].trim() : '';
+
+            // Everything after the task section (tool descriptions, guidelines, etc.)
+            const afterTask = taskMatch
+                ? prompt.slice(prompt.indexOf(taskMatch[0]) + taskMatch[0].length).trim()
+                : '';
+
+            let html = `<div class="task-prompt-block">`;
+            html += `<div class="task-prompt-header">Task Prompt</div>`;
+
+            // Preamble — collapsible
+            if (preamble) {
+                html += `<div class="task-section">`;
+                html += `<div class="collapsible-header" onclick="toggleSection(this)">`;
+                html += `<div class="task-section-label">Preamble</div>`;
+                html += `<span class="toggle-icon">▼ show</span>`;
+                html += `</div>`;
+                html += `<div class="collapsible-body">`;
+                html += `<div class="task-section-content" style="padding-top:10px;">${escapeHtml(preamble)}</div>`;
+                html += `</div>`;
+                html += `</div>`;
+            }
+
+            // Task — always visible, no toggle
+            if (taskText) {
+                html += `<div class="task-section">`;
+                html += `<div class="task-section-label">Task</div>`;
+                html += `<div class="task-section-content">${escapeHtml(taskText)}</div>`;
+                html += `</div>`;
+            } else if (!preamble) {
+                // Fallback: no Task: marker found, show full prompt collapsible
+                html += `<div class="task-section">`;
+                html += `<div class="task-section-label">Prompt</div>`;
+                html += `<div class="task-section-content">${escapeHtml(prompt)}</div>`;
+                html += `</div>`;
+            }
+
+            // Tool descriptions + guidelines — collapsible
+            if (afterTask) {
+                html += `<div class="task-section">`;
+                html += `<div class="collapsible-header" onclick="toggleSection(this)">`;
+                html += `<div class="task-section-label">System Instructions &amp; Tools</div>`;
+                html += `<span class="toggle-icon">▼ show</span>`;
+                html += `</div>`;
+                html += `<div class="collapsible-body">`;
+                html += `<div class="task-section-content" style="padding-top:10px;font-size:12px;color:#8b949e;">${escapeHtml(afterTask)}</div>`;
+                html += `</div>`;
+                html += `</div>`;
+            }
+
+            html += `</div>`;
+            return html;
+        }
+
+        function toggleSection(header) {
+            const body = header.nextElementSibling;
+            const icon = header.querySelector('.toggle-icon');
+            const isOpen = body.classList.toggle('open');
+            icon.textContent = isOpen ? '▲ hide' : '▼ show';
+        }
+
         // Render trace up to current step
         function renderTrace(data) {
             const container = document.getElementById('traceContainer');
@@ -491,12 +680,27 @@
         // Update trace display based on currentStep
         function updateTraceDisplay() {
             const container = document.getElementById('traceContainer');
-            if (!visualizationData || !visualizationData.iterations) return;
+            if (!visualizationData) return;
 
-            let html = '';
+            // Always render the initial prompt block at the top
+            let html = renderInitialPrompt(visualizationData.initial_prompt || '');
             let stepCount = 0;
             
-            for (let iterIdx = 0; iterIdx < visualizationData.iterations.length; iterIdx++) {
+            // Show instruction at the beginning
+            if (visualizationData.instruction) {
+                html += `<div class="iteration-block" style="border: 1px solid #58a6ff;">`;
+                html += `<div class="iteration-header" style="color: #58a6ff;">Task Instruction</div>`;
+                html += `<div class="observation-block">`;
+                html += `<div class="observation-content">${escapeHtml(visualizationData.instruction)}</div>`;
+                html += `</div>`;
+                html += `</div>`;
+            }
+
+            if (visualizationData.iterations) {
+                let stepCount = 0;
+                
+                for (let iterIdx = 0; iterIdx < visualizationData.iterations.length; iterIdx++) {
+
                 const iter = visualizationData.iterations[iterIdx];
                 let iterationStarted = false;
                 let thinkShown = false;
@@ -545,6 +749,7 @@
                 if (iterationStarted) {
                     html += `</div>`;
                 }
+            }
             }
 
             // Add eval block if available and we've reached the end
@@ -909,7 +1114,20 @@
             return content;
         }
 
-        // File selector
+        // Folder selector → populate file list
+        document.getElementById('folderSelect').addEventListener('change', (e) => {
+            const sentinel = e.target.value;
+            const fileSelect = document.getElementById('fileSelect');
+            if (!sentinel) {
+                fileSelect.innerHTML = '<option value="">— select folder first —</option>';
+            } else {
+                // Map sentinel back to real key ("__root__" → "")
+                const realFolder = sentinel === "__root__" ? "" : sentinel;
+                populateFileSelect(realFolder);
+            }
+        });
+
+        // File selector → load data
         document.getElementById('fileSelect').addEventListener('change', (e) => {
             if (e.target.value) {
                 loadVisualizationData(e.target.value);

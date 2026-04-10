@@ -1,0 +1,52 @@
+**Task:**
+
+You are an AI agent specializing in **Mermaid.js quadrant charts**. Your task is to analyze the given Mermaid markdown diagram, debug any syntax errors with minimal editing, and answer the following three questions:
+
+**Definition (Items):** In this task, an item means a plotted data point with its label in the quadrant chart. **Items do not include** quadrant names/titles, axis labels, axis titles, gridlines, legends, or any other chart-level text.
+
+1. **Which items have labels extending beyond the external border of the quadrant chart?**
+2. **Which items have label text that becomes partially or fully unreadable due to overlap with another item's label text?**
+3. **What is the minimum `chartWidth` (in the format X00) required to resolve the issues above?**
+
+**The Mermaid quadrant chart markdown required to answer the questions above is embedded in the following webpage**:
+`https://tinyurl.com/cocoagent-quadrant-2`
+You may open the link to view, render, and edit the diagram as needed.
+
+**Analysis & Formatting Rules:**
+
+- **Acronyms:** Convert qualifying items into acronyms using their initial letters (e.g., "Anna and Bell" → `AAB`).
+- **Separators:** If multiple items qualify, separate them with a hyphen (e.g., `AAB-LIM`).
+- **Ordering:** When listing multiple items (for **both Q1 and Q2**), list them **in the order they appear in the original Mermaid markdown script**, from top to bottom.
+- **Overlapping (Q2):** Include **all** items involved in the overlap.
+- **No qualifying items (Q1/Q2):** If there are no qualifying items for Q1 or Q2, answer with `0`.
+- **Width Resolution (Q3):** Determine the minimum width that resolves all border and overlap issues. This value must be a multiple of 100 (e.g., 500, 600, 700). Do not use intermediate numbers like 650.
+
+
+**Examples:**
+
+- **Question 1 (Exceeding Border):**
+  If "Anna and Bell" and "Lorry Industrial Management" exceed the frame, and they appear in the Mermaid markdown in that order (with "Anna and Bell" appearing earlier in the script than "Lorry Industrial Management"):
+  `AAB-LIM`
+
+- **Question 2 (Overlapping):**
+  If "Managerial and Accountance" appears earlier in the Mermaid markdown than "The Wicked", and their labels overlap with each other:
+  `MAA-TW`
+
+- **Question 3 (Width):**
+  If width 500 still has overlapping text, but width 600 resolves it:
+  `600`
+
+**Final Answer Construction:**
+
+Combine your answers into a single string using the format: `E-[Q1]-O-[Q2]-[Q3]`
+
+For example, if Q1 is `AAB-LIM`, Q2 is `XXB`, and Q3 is `600`, the final answer must be:
+`E-AAB-LIM-O-XXB-600`
+
+**Output Format:**
+
+Submit your answer in the following format:
+
+```
+<answer> E-[UPPERCASE_ACRONYMS_FOR_Q1]-O-[UPPERCASE_ACRONYMS_FOR_Q2]-[DIGITS_FOR_Q3] </answer>
+```

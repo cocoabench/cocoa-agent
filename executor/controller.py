@@ -9,6 +9,7 @@ This module provides a base Controller class and implementations for:
 import os
 import re
 import json
+import time
 import base64
 from typing import Any, Dict, List
 from openai import OpenAI
@@ -22,7 +23,12 @@ try:
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    types = Any
+    genai = None
+    class _GeminiTypesStub:
+        """Stub so that type annotations like `types.Tool` don't raise at import time."""
+        def __getattr__(self, name):
+            return Any
+    types = _GeminiTypesStub()
 
 # Try to import Anthropic libraries
 try:
@@ -33,6 +39,222 @@ except ImportError:
     anthropic = Any
 
 logger = get_logger("llm")
+
+
+MODEL_PRICING_REGISTRY = {
+    # Per 1,000,000 tokens, USD
+    "gpt-5.4": {
+        "input": 2.50,
+        "cached_input": 1.25,
+        "output": 15.00,
+    },
+    "claude-opus-4-6": {
+        "input": 5.00,
+        "cache_write": 6.25,
+        "cache_read": 0.50,
+        "output": 25.00,
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.00,
+        "cache_write": 3.75,
+        "cache_read": 0.30,
+        "output": 15.00,
+    },
+    "gemini-3.1-pro-preview": {
+        "input": 2.00,
+        "input_over_200k": 4.00,
+        "cached_input": 0.20,
+        "cached_input_over_200k": 0.40,
+        "output": 12.00,
+        "output_over_200k": 18.00,
+    },
+}
+
+
+class CostTracker:
+    """Provider-specific token parsing + USD cost calculation."""
+
+    TOKENS_PER_MILLION = 1_000_000
+
+    @staticmethod
+    def _norm_model(model_name: str) -> str:
+        return (model_name or "").strip().lower()
+
+    @staticmethod
+    def _get(obj: Any, key: str, default: Any = 0) -> Any:
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    @classmethod
+    def supports_openai(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) in MODEL_PRICING_REGISTRY and "gpt" in cls._norm_model(model_name)
+
+    @classmethod
+    def supports_anthropic(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) in ["claude-opus-4-6", "claude-sonnet-4-6"]
+
+    @classmethod
+    def supports_gemini(cls, model_name: str) -> bool:
+        return cls._norm_model(model_name) == "gemini-3.1-pro-preview"
+
+    @classmethod
+    def get_pricing(cls, model_name: str) -> Dict[str, float | None]:
+        model_lower = cls._norm_model(model_name)
+        pricing = MODEL_PRICING_REGISTRY.get(model_lower)
+        if not pricing:
+            raise KeyError(f"No pricing configured for model: {model_name}")
+        return pricing
+
+    @classmethod
+    def track_openai(cls, usage: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_openai(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        # Responses API uses input_tokens/output_tokens;
+        # Chat Completions uses prompt_tokens/completion_tokens.
+        prompt_tokens = cls._get(usage, "input_tokens", None)
+        if prompt_tokens is None:
+            prompt_tokens = cls._get(usage, "prompt_tokens", 0)
+        prompt_tokens = int(prompt_tokens or 0)
+
+        details = cls._get(usage, "input_tokens_details", None) or cls._get(usage, "prompt_tokens_details", None)
+        cached_input_tokens = int(cls._get(details, "cached_tokens", 0) or 0)
+
+        completion_tokens = cls._get(usage, "output_tokens", None)
+        if completion_tokens is None:
+            completion_tokens = cls._get(usage, "completion_tokens", 0)
+        completion_tokens = int(completion_tokens or 0)
+
+        out_details = cls._get(usage, "output_tokens_details", None) or cls._get(usage, "completion_tokens_details", None)
+        reasoning_tokens = int(cls._get(out_details, "reasoning_tokens", 0) or 0)
+
+        uncached_input_tokens = max(prompt_tokens - cached_input_tokens, 0)
+
+        cached_price = float(pricing.get("cached_input", pricing["input"]))
+        cost_input_uncached_usd = (uncached_input_tokens / cls.TOKENS_PER_MILLION) * float(pricing["input"])
+        cost_input_cached_usd = (cached_input_tokens / cls.TOKENS_PER_MILLION) * cached_price
+
+        # reasoning_tokens are already included in completion_tokens — do not double-count.
+        cost_output_usd = (completion_tokens / cls.TOKENS_PER_MILLION) * float(pricing["output"])
+        total_cost_usd = cost_input_uncached_usd + cost_input_cached_usd + cost_output_usd
+
+        return {
+            "provider": "openai",
+            "model": model_name,
+            "tokens": {
+                "prompt_tokens": prompt_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "uncached_input_tokens": uncached_input_tokens,
+                "completion_tokens": completion_tokens,
+                "reasoning_tokens": reasoning_tokens,
+            },
+            "cost_breakdown_usd": {
+                "input_uncached_usd": cost_input_uncached_usd,
+                "input_cached_usd": cost_input_cached_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
+
+    @classmethod
+    def track_anthropic(cls, usage: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_anthropic(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        input_tokens = int(cls._get(usage, "input_tokens", 0) or 0)
+        cache_write_tokens = int(cls._get(usage, "cache_creation_input_tokens", 0) or 0)
+        cache_read_tokens = int(cls._get(usage, "cache_read_input_tokens", 0) or 0)
+        output_tokens = int(cls._get(usage, "output_tokens", 0) or 0)
+
+        logger.debug(
+            "Anthropic raw usage: input=%d cache_write=%d cache_read=%d output=%d",
+            input_tokens, cache_write_tokens, cache_read_tokens, output_tokens,
+        )
+
+        cost_input_usd = (input_tokens / cls.TOKENS_PER_MILLION) * float(pricing["input"])
+        cost_cache_write_usd = (cache_write_tokens / cls.TOKENS_PER_MILLION) * float(pricing["cache_write"])
+        cost_cache_read_usd = (cache_read_tokens / cls.TOKENS_PER_MILLION) * float(pricing["cache_read"])
+        cost_output_usd = (output_tokens / cls.TOKENS_PER_MILLION) * float(pricing["output"])
+        total_cost_usd = cost_input_usd + cost_cache_write_usd + cost_cache_read_usd + cost_output_usd
+
+        return {
+            "provider": "anthropic",
+            "model": model_name,
+            "tokens": {
+                "input_tokens": input_tokens,
+                "cache_write_input_tokens": cache_write_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
+                "output_tokens": output_tokens,
+            },
+            "cost_breakdown_usd": {
+                "input_usd": cost_input_usd,
+                "cache_write_usd": cost_cache_write_usd,
+                "cache_read_usd": cost_cache_read_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
+
+    @classmethod
+    def track_gemini(cls, response: Any, model_name: str) -> Dict[str, Any] | None:
+        if not cls.supports_gemini(model_name):
+            return None
+        pricing = cls.get_pricing(model_name)
+
+        usage_metadata = cls._get(response, "usage_metadata", None) or cls._get(response, "usageMetadata", None)
+        if usage_metadata is None:
+            return None
+
+        prompt_token_count = cls._get(usage_metadata, "prompt_token_count", None)
+        if prompt_token_count is None:
+            prompt_token_count = cls._get(usage_metadata, "promptTokenCount", 0)
+
+        cached_content_token_count = cls._get(usage_metadata, "cached_content_token_count", None)
+        if cached_content_token_count is None:
+            cached_content_token_count = cls._get(usage_metadata, "cachedContentTokenCount", 0)
+
+        candidates_token_count = cls._get(usage_metadata, "candidates_token_count", None)
+        if candidates_token_count is None:
+            candidates_token_count = cls._get(usage_metadata, "candidatesTokenCount", 0)
+
+        cached_input_tokens = int(cached_content_token_count or 0)
+        prompt_tokens = int(prompt_token_count or 0)
+        uncached_input_tokens = max(prompt_tokens - cached_input_tokens, 0)
+        output_tokens = int(candidates_token_count or 0)
+
+        # Tiered pricing: >200K context tokens uses the higher tier
+        over_200k = prompt_tokens > 200_000
+        input_price = float(pricing.get("input_over_200k", pricing["input"]) if over_200k else pricing["input"])
+        cached_price = float(pricing.get("cached_input_over_200k", pricing["cached_input"]) if over_200k else pricing["cached_input"])
+        output_price = float(pricing.get("output_over_200k", pricing["output"]) if over_200k else pricing["output"])
+
+        cost_input_uncached_usd = (uncached_input_tokens / cls.TOKENS_PER_MILLION) * input_price
+        cost_input_cached_usd = (cached_input_tokens / cls.TOKENS_PER_MILLION) * cached_price
+        cost_output_usd = (output_tokens / cls.TOKENS_PER_MILLION) * output_price
+        total_cost_usd = cost_input_uncached_usd + cost_input_cached_usd + cost_output_usd
+
+        return {
+            "provider": "gemini",
+            "model": model_name,
+            "tokens": {
+                "prompt_token_count": prompt_tokens,
+                "cached_content_token_count": cached_input_tokens,
+                "uncached_input_tokens": uncached_input_tokens,
+                "candidates_token_count": output_tokens,
+            },
+            "pricing_tier": ">200k" if over_200k else "<=200k",
+            "cost_breakdown_usd": {
+                "input_uncached_usd": cost_input_uncached_usd,
+                "input_cached_usd": cost_input_cached_usd,
+                "output_usd": cost_output_usd,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
 
 
 def format_tools_as_text(tools: List[Dict[str, Any]]) -> str:
@@ -90,6 +312,10 @@ You are a powerful AI agent with access to a comprehensive sandbox environment. 
 
 Task:
 {instruction}
+
+## Thinking Protocol
+
+Before EVERY action, output a `Thought:` section explaining what you're about to do and why.
 
 ## Available Tools
 
@@ -300,6 +526,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -362,7 +594,7 @@ Task:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 """
 
 UNIFIED_FEEDBACK_PROMPT_TEMPLATE = """
@@ -602,6 +834,12 @@ Task:
 - **Working directory**: Always `/home/gem/`
 - Use relative paths from `/home/gem/` or absolute paths starting with `/home/gem/`
 - For file operations, remember root is `/home/gem/`
+- **CRITICAL - Avoid large outputs in code execution:**
+  - **NEVER** use `print()` or any other method to output base64-encoded data, raw image bytes, or large binary strings in `code_execute`. This will flood the output and may exceed API length limits.
+  - **NEVER** print, display, or return image pixel arrays (e.g., `np.array(img)`), raw image data, or base64 strings.
+  - **NEVER** use `plt.show()`, `display()`, `Image.show()`, or `repr()` on image objects in `code_execute` — these produce huge outputs.
+  - When processing images in code, only print short metadata (e.g., file size, dimensions, format) — never the image content itself.
+  - To **view** or **analyze** an image visually, always use the `image_read(path)` tool instead of code.
 
 ## Cross-Tool Workflow Guidelines
 
@@ -671,7 +909,7 @@ To call a tool, use this format:
 7. **MUST call `task_complete`** when finished, with result if applicable
 8. **No fabrication** - never invent URLs, filenames, or data
 9. **Stop retrying** after 6 failed browser actions - switch strategy or request help
-10. **Use `image_read` for images**: When you need to read or view a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display images (e.g., using matplotlib/PIL) because it produces large base64 outputs that exceed API length limits.
+10. **Use `image_read` for images**: When you need to view or analyze a downloaded image, use the `image_read` tool. **DO NOT** use `code_execute` to display, print, or inspect images (e.g., via matplotlib `plt.show()`, PIL `Image.show()`, printing numpy arrays, or any operation that outputs base64/binary data). These produce extremely large outputs that exceed API length limits and break the conversation. If you need image metadata (size, format, mode), print ONLY those short strings — never the image content or pixel data.
 
 ## Summary
 Act visually, verify rigorously, and avoid blind exploration. Prefer one extra screenshot + VLM judgement before any ambiguous click.
@@ -698,6 +936,20 @@ Remember:
 {{"name": "tool_name", "arguments": {{"param1": "value1", "param2": "value2"}}}}
 </tool_call>
 """
+
+KIMI_RELATIVE_COORDINATE_INSTRUCTION = """
+## Kimi Coordinate Rule
+
+For on-screen browser actions, output normalized relative coordinates instead of absolute pixels.
+
+- For `browser_click(x, y, ...)`, `browser_move_to(x, y)`, and `browser_drag_to(x, y)`:
+  - `x` and `y` MUST be numbers in `[0, 1]`
+  - Interpret them relative to the current screenshot / viewport
+  - Example: screen center is `(0.5, 0.5)`
+  - Do NOT output pixel coordinates like `670` or `830`
+- Use `browser_move_rel` / `browser_drag_rel` only for true relative cursor offsets from the current mouse position
+- Before clicking, estimate coordinates from the screenshot and express them as normalized ratios
+""".strip()
 
 
 class Controller:
@@ -753,160 +1005,6 @@ class Controller:
         return
 
 
-# OpenAI API Pricing (per 1M tokens)
-OPENAI_PRICING = {
-    # Flagship models
-    "gpt-5.2": {
-        "input": 1.750,
-        "cached_input": 0.175,
-        "output": 14.000
-    },
-    "gpt-5.2-pro": {
-        "input": 21.00,
-        "cached_input": None,
-        "output": 168.00
-    },
-    "gpt-5-mini": {
-        "input": 0.250,
-        "cached_input": 0.025,
-        "output": 2.000
-    },
-    # Fine-tuning models
-    "gpt-4.1": {
-        "input": 3.00,
-        "cached_input": 0.75,
-        "output": 12.00
-    },
-    "gpt-4.1-mini": {
-        "input": 0.80,
-        "cached_input": 0.20,
-        "output": 3.20
-    },
-    "gpt-4.1-nano": {
-        "input": 0.20,
-        "cached_input": 0.05,
-        "output": 0.80
-    },
-    "o4-mini": {
-        "input": 4.00,
-        "cached_input": 1.00,
-        "output": 16.00
-    },
-    # Realtime API - Text
-    "gpt-realtime": {
-        "input": 4.00,
-        "cached_input": 0.40,
-        "output": 16.00
-    },
-    "gpt-realtime-mini": {
-        "input": 0.60,
-        "cached_input": 0.06,
-        "output": 2.40
-    },
-    # Image Generation API - Text
-    "gpt-image-1.5": {
-        "input": 5.00,
-        "cached_input": 1.25,
-        "output": 10.00
-    },
-    "gpt-image-1": {
-        "input": 5.00,
-        "cached_input": 1.25,
-        "output": None
-    },
-    "gpt-image-1-mini": {
-        "input": 2.00,
-        "cached_input": 0.20,
-        "output": None
-    },
-    # Legacy models (fallback pricing)
-    "gpt-4o": {
-        "input": 2.50,
-        "cached_input": 0.25,
-        "output": 10.00
-    },
-    "gpt-4o-mini": {
-        "input": 0.15,
-        "cached_input": 0.015,
-        "output": 0.60
-    },
-    "gpt-4-turbo": {
-        "input": 10.00,
-        "cached_input": 1.00,
-        "output": 30.00
-    },
-    "gpt-3.5-turbo": {
-        "input": 0.50,
-        "cached_input": 0.25,
-        "output": 1.50
-    }
-}
-
-
-def get_model_pricing(model_name: str) -> Dict[str, float | None]:
-    """Get pricing for a model, with fallback to closest match.
-    
-    Args:
-        model_name: Model name (e.g., "gpt-5.2", "gpt-4.1")
-        
-    Returns:
-        Dictionary with input, cached_input, and output pricing per 1M tokens
-    """
-    model_lower = model_name.lower()
-    
-    # Direct match
-    if model_lower in OPENAI_PRICING:
-        return OPENAI_PRICING[model_lower]
-    
-    # Try to match by prefix
-    for key, pricing in OPENAI_PRICING.items():
-        if model_lower.startswith(key) or key in model_lower:
-            return pricing
-    
-    # Default fallback to gpt-4.1 pricing
-    logger.warning(f"Unknown model pricing for {model_name}, using gpt-4.1 pricing as fallback")
-    return OPENAI_PRICING.get("gpt-4.1", {"input": 3.00, "cached_input": 0.75, "output": 12.00})
-
-
-def calculate_cost(usage, model_name: str) -> float:
-    """Calculate API cost from usage information.
-    
-    Args:
-        usage: Usage object from OpenAI API response (has prompt_tokens, completion_tokens, total_tokens, cached_tokens)
-        model_name: Model name for pricing lookup
-        
-    Returns:
-        Total cost in USD
-    """
-    pricing = get_model_pricing(model_name)
-    
-    # Get token counts (default to 0 if not present)
-    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-    cached_tokens = getattr(usage, "cached_tokens", 0) or 0
-    
-    # Calculate costs
-    input_cost = 0.0
-    if cached_tokens > 0 and pricing.get("cached_input") is not None:
-        # Use cached pricing for cached tokens
-        input_cost += (cached_tokens / 1_000_000) * pricing["cached_input"]
-        # Use regular input pricing for non-cached tokens
-        non_cached = prompt_tokens - cached_tokens
-        if non_cached > 0 and pricing.get("input") is not None:
-            input_cost += (non_cached / 1_000_000) * pricing["input"]
-    else:
-        # All tokens use regular input pricing
-        if pricing.get("input") is not None:
-            input_cost = (prompt_tokens / 1_000_000) * pricing["input"]
-    
-    output_cost = 0.0
-    if completion_tokens > 0 and pricing.get("output") is not None:
-        output_cost = (completion_tokens / 1_000_000) * pricing["output"]
-    
-    total_cost = input_cost + output_cost
-    return total_cost
-
-
 class BaseLLM(Controller):
     """Base class for LLM controllers with common functionality."""
     
@@ -929,14 +1027,26 @@ class BaseLLM(Controller):
         # Cost tracking
         self.total_cost: float = 0.0
         self.total_input_tokens: int = 0
+        self.total_uncached_input_tokens: int = 0
         self.total_output_tokens: int = 0
         self.total_cached_tokens: int = 0
+        self.total_reasoning_tokens: int = 0
+        self.total_cache_write_input_tokens: int = 0
+        self.total_cache_read_input_tokens: int = 0
+
+        # Cost component tracking (USD)
+        self.total_cost_input_uncached_usd: float = 0.0
+        self.total_cost_input_cached_usd: float = 0.0
+        self.total_cost_output_usd: float = 0.0
+        self.total_cost_cache_write_usd: float = 0.0
+        self.total_cost_cache_read_usd: float = 0.0
         self.api_calls: int = 0
+        self.per_call_costs: list = []
         
         # Store client type and determine tool usage
         self.client_type = client_type
         self.use_tools = client_type in ["browser", "file", "code", "jupyter", "shell", "unified"]
-        self.max_parse_retries = max(1, int(llm_config.get("max_parse_retries", 2)))
+        self.max_parse_retries = max(1, int(llm_config.get("max_parse_retries", 5)))
         
         # Load appropriate tools based on client type
         if self.use_tools:
@@ -982,10 +1092,11 @@ class BaseLLM(Controller):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message")
@@ -993,6 +1104,34 @@ class BaseLLM(Controller):
         else:
             # Regular text message
             return prompt
+
+    def _detect_image_media_type(self, img_base64: str) -> str:
+        if not isinstance(img_base64, str) or not img_base64:
+            return "image/png"
+        if img_base64.startswith("data:"):
+            try:
+                header = img_base64.split(",", 1)[0]
+                if ";" in header:
+                    return header.split(";", 1)[0].replace("data:", "") or "image/png"
+            except Exception:
+                return "image/png"
+        import base64
+        prefix = img_base64[:128]
+        if len(prefix) % 4 != 0:
+            prefix += "=" * (4 - (len(prefix) % 4))
+        try:
+            data = base64.b64decode(prefix, validate=False)
+        except Exception:
+            return "image/png"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if data.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            return "image/gif"
+        if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp"
+        return "image/png"
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle API response and parse into action format.
@@ -1043,9 +1182,16 @@ class BaseLLM(Controller):
                 return parsed_response
             except Exception as e:
                 logger.error(f"Error calling LLM API: {e}")
+                # Don't retry deterministic client errors (4xx except 429)
+                status_code = getattr(e, "status_code", None)
+                if status_code is not None and 400 <= status_code < 500 and status_code != 429:
+                    logger.error(f"Non-retryable client error (HTTP {status_code}), raising immediately")
+                    raise
                 if attempt >= max_attempts:
                     raise
-                # Retry logic can be added here if needed
+                sleep_time = min(30 * attempt, 120)
+                logger.info(f"Retrying in {sleep_time}s (attempt {attempt}/{max_attempts})...")
+                time.sleep(sleep_time)
                 continue
         
         raise ValueError("Failed to obtain a valid action after retrying LLM response parsing.")
@@ -1198,7 +1344,6 @@ class BaseLLM(Controller):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
     
     def get_cost_stats(self) -> Dict[str, Any]:
         """Get API cost and usage statistics.
@@ -1208,12 +1353,22 @@ class BaseLLM(Controller):
         """
         return {
             "total_cost_usd": round(self.total_cost, 6),
+            "total_cost_input_uncached_usd": round(self.total_cost_input_uncached_usd, 6),
+            "total_cost_input_cached_usd": round(self.total_cost_input_cached_usd, 6),
+            "total_cost_output_usd": round(self.total_cost_output_usd, 6),
+            "total_cost_cache_write_usd": round(self.total_cost_cache_write_usd, 6),
+            "total_cost_cache_read_usd": round(self.total_cost_cache_read_usd, 6),
             "total_input_tokens": self.total_input_tokens,
+            "total_uncached_input_tokens": self.total_uncached_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "total_cached_tokens": self.total_cached_tokens,
+            "total_reasoning_tokens": self.total_reasoning_tokens,
+            "total_cache_write_input_tokens": self.total_cache_write_input_tokens,
+            "total_cache_read_input_tokens": self.total_cache_read_input_tokens,
             "total_tokens": self.total_input_tokens + self.total_output_tokens,
             "api_calls": self.api_calls,
-            "model": self.model
+            "model": self.model,
+            "per_call_costs": self.per_call_costs,
         }
     
     def reset_cost_tracking(self) -> None:
@@ -1221,9 +1376,21 @@ class BaseLLM(Controller):
         logger.debug("Resetting cost tracking")
         self.total_cost = 0.0
         self.total_input_tokens = 0
+        self.total_uncached_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cached_tokens = 0
+        self.total_reasoning_tokens = 0
+        self.total_cache_write_input_tokens = 0
+        self.total_cache_read_input_tokens = 0
+
+        self.total_cost_input_uncached_usd = 0.0
+        self.total_cost_input_cached_usd = 0.0
+        self.total_cost_output_usd = 0.0
+        self.total_cost_cache_write_usd = 0.0
+        self.total_cost_cache_read_usd = 0.0
+
         self.api_calls = 0
+        self.per_call_costs = []
         self.last_think = None
     
     def get_last_think(self) -> str | None:
@@ -1255,6 +1422,7 @@ class BaseLLM(Controller):
         self.messages.append(tool_message)
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
     
+
     def _remove_images_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Remove images from a message, keeping only text content.
         
@@ -1356,8 +1524,17 @@ class OpenAILLM(BaseLLM):
             client_kwargs["base_url"] = base_url
 
         self.client = OpenAI(**client_kwargs)
-        
-        logger.info(f"OpenAILLM initialized with model: {self.model}")
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
+        self._use_responses_api = isinstance(self.model, str) and self.model.lower() in ["gpt-5.4-pro", "gpt-5.4"]
+
+        logger.info(f"OpenAILLM initialized with model: {self.model} (responses_api={self._use_responses_api})")
+        logger.info(
+            "OpenAILLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         if base_url:
             logger.info(f"Using custom base_url: {base_url}")
         logger.debug(f"API key configured: {bool(api_key)}")
@@ -1381,10 +1558,11 @@ class OpenAILLM(BaseLLM):
                 "text": prompt
             })
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:{media_type};base64,{img_base64}"
                     }
                 })
             logger.debug(f"Adding {len(images_base64)} image(s) to message (total size: {sum(len(img) for img in images_base64)} chars)")
@@ -1392,83 +1570,333 @@ class OpenAILLM(BaseLLM):
         else:
             # Regular text message
             return prompt
+
+    def _normalize_tool_calls_for_history(self, tool_calls) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """Validate tool calls before storing them in API history.
+
+        Returns a tuple of:
+        - normalized valid tool calls with canonical JSON arguments
+        - invalid tool call metadata for correction prompts
+        """
+        normalized_tool_calls: list[Dict[str, Any]] = []
+        invalid_tool_calls: list[Dict[str, Any]] = []
+
+        for tc in tool_calls:
+            tool_call_id = getattr(tc, "id", None)
+            tool_call_type = getattr(tc, "type", "function")
+            function = getattr(tc, "function", None)
+            tool_name = getattr(function, "name", "") if function else ""
+            raw_arguments = getattr(function, "arguments", "{}") if function else "{}"
+
+            if isinstance(raw_arguments, dict):
+                parsed_arguments = raw_arguments
+            elif isinstance(raw_arguments, str):
+                try:
+                    parsed_arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    invalid_tool_calls.append({
+                        "id": tool_call_id,
+                        "name": tool_name,
+                        "arguments": raw_arguments,
+                        "error": str(exc),
+                    })
+                    continue
+            else:
+                invalid_tool_calls.append({
+                    "id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": raw_arguments,
+                    "error": f"Arguments must be a JSON string or object, got {type(raw_arguments).__name__}",
+                })
+                continue
+
+            if not isinstance(parsed_arguments, dict):
+                invalid_tool_calls.append({
+                    "id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": raw_arguments,
+                    "error": f"Arguments must decode to a JSON object, got {type(parsed_arguments).__name__}",
+                })
+                continue
+
+            normalized_tool_calls.append({
+                "id": tool_call_id,
+                "type": tool_call_type,
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(parsed_arguments, ensure_ascii=False),
+                }
+            })
+
+        return normalized_tool_calls, invalid_tool_calls
+
+    def _build_invalid_tool_call_correction(self, invalid_tool_calls: list[Dict[str, Any]]) -> str:
+        """Create a correction prompt for malformed tool calls."""
+        lines = [
+            "Your previous tool call could not be parsed, so it was not executed.",
+            "Please try again and re-emit the intended tool call using the documented tool-call format only.",
+            "",
+            "Invalid tool calls:",
+        ]
+        for item in invalid_tool_calls:
+            lines.append(
+                f"- {item.get('name') or '<unknown>'}: arguments={item.get('arguments')!r}; error={item.get('error')}"
+            )
+        return "\n".join(lines)
     
+    def _convert_tools_to_responses_api(self, openai_tools: list) -> list:
+        """Convert Chat Completions tool definitions to Responses API format (flat, no 'function' wrapper)."""
+        responses_tools = []
+        for tool in openai_tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                responses_tools.append({
+                    "type": "function",
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                })
+        return responses_tools
+
+    def _convert_messages_to_responses_input(self) -> list:
+        """Convert Chat-Completions-style self.messages to Responses API input items.
+
+        Mapping:
+          system   -> {"role": "developer", ...}
+          user     -> {"role": "user", ...}  (images: image_url -> input_image)
+          assistant (with tool_calls) -> function_call items
+          assistant (text only) -> {"role": "assistant", ...}
+          tool     -> function_call_output
+        """
+        items: list = []
+        for msg in self.messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            tool_calls = msg.get("tool_calls")
+
+            if role == "system":
+                items.append({
+                    "role": "developer",
+                    "content": content if isinstance(content, str) else str(content or ""),
+                })
+
+            elif role == "user":
+                if isinstance(content, list):
+                    new_parts = []
+                    for part in content:
+                        if not isinstance(part, dict):
+                            continue
+                        if part.get("type") == "text":
+                            new_parts.append({"type": "input_text", "text": part.get("text", "")})
+                        elif part.get("type") == "image_url":
+                            url = part.get("image_url", {}).get("url", "")
+                            new_parts.append({"type": "input_image", "image_url": url})
+                    items.append({"role": "user", "content": new_parts})
+                else:
+                    items.append({"role": "user", "content": str(content or "")})
+
+            elif role == "assistant":
+                if tool_calls:
+                    for tc in tool_calls:
+                        func = tc.get("function", {})
+                        items.append({
+                            "type": "function_call",
+                            "call_id": tc.get("id", ""),
+                            "name": func.get("name", ""),
+                            "arguments": func.get("arguments", "{}"),
+                        })
+                if content:
+                    items.append({
+                        "role": "assistant",
+                        "content": content if isinstance(content, str) else str(content),
+                    })
+
+            elif role == "tool":
+                items.append({
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": content if isinstance(content, str) else str(content or ""),
+                })
+        return items
+
     def _make_api_call(self) -> Any:
-        """Make OpenAI API call."""
-        # Prepare API call parameters
-        api_params = {
-            "model": self.model,
-            "messages": self.messages
-        }
-        
-        # Add tools if in tool calling mode
-        if self.use_tools and self.tools:
-            api_params["tools"] = self.tools
-        
-        return self.client.chat.completions.create(**api_params)
+        if self._use_responses_api:
+            input_items = self._convert_messages_to_responses_input()
+            api_params = {
+                "model": self.model,
+                "input": input_items,
+                "reasoning": {"effort": "high"},
+            }
+            if self.use_tools and self.tools:
+                api_params["tools"] = self._convert_tools_to_responses_api(self.tools)
+            return self.client.responses.create(**api_params)
+        else:
+            api_params = {
+                "model": self.model,
+                "messages": self.messages,
+            }
+            if self.use_tools and self.tools:
+                api_params["tools"] = self.tools
+            return self.client.chat.completions.create(**api_params)
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle OpenAI API response."""
-        # Calculate and track API cost
         if hasattr(response, "usage") and response.usage:
-            usage = response.usage
-            cost = calculate_cost(usage, self.model)
-            self.total_cost += cost
-            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            self.api_calls += 1
-            
-            logger.info(
-                f"API call cost: ${cost:.6f} | "
-                f"Tokens: {getattr(usage, 'prompt_tokens', 0)} input, "
-                f"{getattr(usage, 'completion_tokens', 0)} output, "
-                f"{getattr(usage, 'cached_tokens', 0)} cached | "
-                f"Total cost: ${self.total_cost:.6f}"
-            )
+            cost_info = CostTracker.track_openai(response.usage, self.model)
+            if cost_info:
+                cost = float(cost_info["total_cost_usd"])
+                tokens = cost_info["tokens"]
+                breakdown = cost_info["cost_breakdown_usd"]
 
-        message = response.choices[0].message
-        
+                self.total_cost += cost
+                self.total_input_tokens += tokens["prompt_tokens"]
+                self.total_uncached_input_tokens += tokens["uncached_input_tokens"]
+                self.total_output_tokens += tokens["completion_tokens"]
+                self.total_cached_tokens += tokens["cached_input_tokens"]
+                self.total_reasoning_tokens += tokens["reasoning_tokens"]
+
+                self.total_cost_input_uncached_usd += float(breakdown["input_uncached_usd"])
+                self.total_cost_input_cached_usd += float(breakdown["input_cached_usd"])
+                self.total_cost_output_usd += float(breakdown["output_usd"])
+
+                self.api_calls += 1
+                self.per_call_costs.append(cost_info)
+
+                logger.info(
+                    f"API call #{self.api_calls} cost: ${cost:.6f} | "
+                    f"Tokens: {tokens['prompt_tokens']} in, {tokens['completion_tokens']} out, "
+                    f"{tokens['cached_input_tokens']} cached, {tokens['reasoning_tokens']} reasoning | "
+                    f"Running total: ${self.total_cost:.6f}"
+                )
+
+        class MockFunction:
+            def __init__(self, name, arguments):
+                self.name = name
+                self.arguments = arguments
+
+        class MockToolCall:
+            def __init__(self, id, type, function):
+                self.id = id
+                self.type = type
+                self.function = function
+
+        class MockMessage:
+            def __init__(self):
+                self.content = None
+                self.tool_calls = None
+
+        # Detect legacy Chat Completions response format
+        if hasattr(response, 'choices') and response.choices:
+            message = response.choices[0].message
+        else:
+            # Compatibility path for newer Responses API
+            message = MockMessage()
+            
+            # 1. Extract text content (support multiple possible field names)
+            if hasattr(response, 'output_text'):
+                message.content = response.output_text
+            elif hasattr(response, 'content'):
+                message.content = response.content
+            elif hasattr(response, 'text'):
+                message.content = response.text
+            else:
+                # If none exist, try treating `output` as a plain string
+                message.content = getattr(response, 'output', "") if isinstance(getattr(response, 'output', None), str) else None
+
+            # 2. Extract tool calls (support both object and dict variants)
+            raw_output = getattr(response, 'output', [])
+            raw_tool_calls = getattr(response, 'tool_calls', [])
+            
+            # Determine which field contains tool call entries
+            items_to_check = raw_tool_calls if raw_tool_calls else (raw_output if isinstance(raw_output, list) else [])
+            
+            extracted_tools = []
+            for item in items_to_check:
+                # Support SDK returns as either dict or Pydantic-like object
+                is_dict = isinstance(item, dict)
+                item_type = item.get('type', '') if is_dict else getattr(item, 'type', '')
+                
+                # Check whether this item represents a tool/function call
+                if item_type in ['function', 'function_call'] or (is_dict and 'name' in item) or hasattr(item, 'name'):
+                    f_name = item.get('name', '') if is_dict else getattr(item, 'name', '')
+                    f_args = item.get('arguments', '{}') if is_dict else getattr(item, 'arguments', '{}')
+                    
+                    # Use provided call ID, otherwise generate a unique mock ID
+                    tc_id = item.get('call_id', item.get('id', f"call_{id(item)}")) if is_dict else getattr(item, 'call_id', getattr(item, 'id', f"call_{id(item)}"))
+                    
+                    extracted_tools.append(MockToolCall(
+                        id=tc_id, 
+                        type="function", 
+                        function=MockFunction(name=f_name, arguments=f_args)
+                    ))
+            
+            if extracted_tools:
+                message.tool_calls = extracted_tools
+
         # Handle tool calling response (OpenAI format)
         if self.use_tools and hasattr(message, 'tool_calls') and message.tool_calls:
             # Save think content (reasoning before action) for visualization
             self.last_think = message.content if message.content else None
-            
+
+            normalized_tool_calls, invalid_tool_calls = self._normalize_tool_calls_for_history(message.tool_calls)
+
+            if invalid_tool_calls:
+                logger.warning(
+                    f"Rejected {len(invalid_tool_calls)} malformed tool call(s) from {self.model}; "
+                    "they will not be written back to API history."
+                )
+                for invalid_tool_call in invalid_tool_calls:
+                    logger.error(
+                        "Invalid tool call arguments for %s: %r (%s)",
+                        invalid_tool_call.get("name"),
+                        invalid_tool_call.get("arguments"),
+                        invalid_tool_call.get("error"),
+                    )
+
+                if message.content:
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": message.content,
+                    })
+
+                if attempt >= max_attempts:
+                    return {
+                        "action_type": "error",
+                        "error_message": self._build_invalid_tool_call_correction(invalid_tool_calls),
+                    }
+
+                self.messages.append({
+                    "role": "user",
+                    "content": self._build_invalid_tool_call_correction(invalid_tool_calls),
+                })
+                return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
+
             self.messages.append({
                 "role": "assistant",
                 "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in message.tool_calls
-                ]
+                "tool_calls": normalized_tool_calls,
             })
-            
-            logger.debug(f"Received {len(message.tool_calls)} tool calls from {self.model}")
-            
+
+            logger.debug(f"Received {len(normalized_tool_calls)} tool calls from {self.model}")
+
             try:
-                parsed_response = self.parse_tool_calls(message.tool_calls)
+                parsed_response = self.parse_tool_calls_list(normalized_tool_calls)
                 logger.debug(f"Parsed tool calls (ACTION): \n{colorize(json.dumps(parsed_response, indent=2), 'YELLOW')}")
                 return parsed_response
             except ValueError as parse_error:
                 logger.warning(f"Failed to parse tool calls (attempt {attempt}/{max_attempts}): {parse_error}")
                 # Add tool messages for each tool_call_id to satisfy OpenAI API requirements
-                for tc in message.tool_calls:
-                    tool_call_id = getattr(tc, "id", None)
+                for tc in normalized_tool_calls:
+                    tool_call_id = tc.get("id")
                     if tool_call_id:
                         error_content = f"Error parsing tool call: {str(parse_error)}"
                         self.add_tool_message(tool_call_id, error_content)
-                
+
                 if attempt >= max_attempts:
                     return {
                         "action_type": "error",
                         "error_message": str(parse_error),
-                        "tool_calls": message.tool_calls
+                        "tool_calls": normalized_tool_calls
                     }
                 # Add error message to conversation and retry
                 error_message = (
@@ -1516,7 +1944,7 @@ class OpenAILLM(BaseLLM):
                 })
                 # Retry by making another API call
                 return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
-    
+
     def parse_tool_calls_list(self, tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Parse a list of tool calls into action format."""
         actions = []
@@ -1599,33 +2027,6 @@ class OpenAILLM(BaseLLM):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
-
-    def get_cost_stats(self) -> Dict[str, Any]:
-        """Get API cost and usage statistics."""
-        return {
-            "total_cost_usd": round(self.total_cost, 6),
-            "total_input_tokens": self.total_input_tokens,
-            "total_output_tokens": self.total_output_tokens,
-            "total_cached_tokens": self.total_cached_tokens,
-            "total_tokens": self.total_input_tokens + self.total_output_tokens,
-            "api_calls": self.api_calls,
-            "model": self.model
-        }
-    
-    def reset_cost_tracking(self) -> None:
-        """Reset cost tracking statistics."""
-        logger.debug("Resetting cost tracking")
-        self.total_cost = 0.0
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cached_tokens = 0
-        self.api_calls = 0
-        self.last_think = None
-    
-    def get_last_think(self) -> str | None:
-        """Get the last think/reasoning content for visualization."""
-        return self.last_think
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for OpenAI tool-calling compliance."""
@@ -1644,17 +2045,51 @@ class OpenAILLM(BaseLLM):
         logger.debug(f"Added tool message for {tool_call_id}: {content[:200]}")
     
     def _cleanup_old_user_message_images(self) -> None:
-        """Remove images from old user messages (default implementation: no-op)."""
-        pass
+        """Remove images from old user messages, keeping only the most recent user image turn."""
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("OpenAILLM: keeping images in all user messages (cleanup disabled)")
+            return
+
+        # Find the last user message (should be the one we just added)
+        last_user_msg_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].get("role") == "user":
+                last_user_msg_idx = i
+                break
+
+        # Remove images from all user messages except the last one
+        if last_user_msg_idx is not None:
+            for i in range(len(self.messages)):
+                if i != last_user_msg_idx and self.messages[i].get("role") == "user":
+                    old_content = self.messages[i].get("content", "")
+                    if isinstance(old_content, list):
+                        has_images = any(
+                            isinstance(item, dict) and item.get("type") == "image_url"
+                            for item in old_content
+                        )
+                        if has_images:
+                            self.messages[i] = self._remove_images_from_message(self.messages[i])
+                            logger.debug(f"Removed images from old user message at index {i}")
 
 
 class QwenLLM(OpenAILLM):
-    """Language model client for Qwen models (compatible with OpenAI API but with special handling)."""
+    """Language model client for Qwen models (compatible with OpenAI API but with special handling).
+
+    Handles two distinct model families:
+    - Qwen3-VL: text-based tool calling via <tool_call> tags, special prompt templates
+    - Qwen3.5+: standard OpenAI tool calling (server-side --tool-call-parser), reasoning_content support
+    """
 
     def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
         super().__init__(llm_config, client_type, **kwargs)
-        self.is_qwen_vl_model = "qwen3-vl" in self.model.lower() or "qwen3_vl" in self.model.lower()
-        logger.info(f"QwenLLM initialized with model: {self.model} (is_vl: {self.is_qwen_vl_model})")
+        model_lower = self.model.lower()
+        self.is_qwen_vl_model = "qwen3-vl" in model_lower or "qwen3_vl" in model_lower
+        self.is_qwen35_model = "qwen3.5" in model_lower or "qwen3_5" in model_lower
+        logger.info(
+            f"QwenLLM initialized with model: {self.model} "
+            f"(is_vl: {self.is_qwen_vl_model}, is_3.5: {self.is_qwen35_model}, "
+            f"cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
 
     def _prepare_message_content(self, prompt: str, images_base64: list = None) -> Any:
         """Prepare message content for Qwen models."""
@@ -1735,7 +2170,8 @@ class QwenLLM(OpenAILLM):
         # Prepare API call parameters
         api_params = {
             "model": self.model,
-            "messages": self.messages
+            "messages": self.messages,
+            "extra_body": {"reasoning": {"enabled": True}}
         }
         
         # Add tools if in tool calling mode (except for Qwen3-VL text-based tool calls)
@@ -1745,29 +2181,32 @@ class QwenLLM(OpenAILLM):
         return self.client.chat.completions.create(**api_params)
 
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
-        """Handle API response with Qwen-specific parsing."""
-        # Calculate cost (same as base)
-        if hasattr(response, "usage") and response.usage:
-            usage = response.usage
-            cost = calculate_cost(usage, self.model)
-            self.total_cost += cost
-            self.total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-            self.total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-            self.total_cached_tokens += getattr(usage, "cached_tokens", 0) or 0
-            self.api_calls += 1
-            logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
+        """Handle API response with Qwen-specific parsing.
+
+        For Qwen3.5+: server-side --reasoning-parser and --tool-call-parser handle parsing,
+        so we use standard OpenAI handling and just capture reasoning_content for visualization.
+        For Qwen3-VL: text-based <tool_call> tag parsing (legacy path).
+        """
+        # Qwen3.5+: standard OpenAI tool_calls + reasoning_content (server-side parsed)
+        if self.is_qwen35_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+
+        # Qwen3-VL / older Qwen: text-based tool call parsing.
+        # Per benchmark requirements, we do not track costs for Qwen/DeepSeek/other providers.
 
         message = response.choices[0].message
         assistant_message = message.content if message.content else ""
         
-        # Handle Qwen model special format (text-based tool calls)
-        # Check for tool calls either by content pattern
         has_tool_call_pattern = ("<tool_call>" in assistant_message or "</tool_call>" in assistant_message)
         
         if self.use_tools and assistant_message and has_tool_call_pattern:
             tool_calls = self.parse_text_tool_calls(assistant_message)
             if tool_calls:
-                # Save think content (extract reasoning before tool calls) for visualization
                 if "<tool_call>" in assistant_message:
                     think_part = assistant_message.split("<tool_call>")[0].strip()
                     self.last_think = think_part if think_part else None
@@ -1794,7 +2233,6 @@ class QwenLLM(OpenAILLM):
                     self.messages.append({"role": "user", "content": error_message})
                     return self._handle_api_response(self._make_api_call(), attempt + 1, max_attempts)
         
-        # If no text tool calls, fall back to base implementation (which handles standard tool calls or JSON)
         return super()._handle_api_response(response, attempt, max_attempts)
 
     def parse_text_tool_calls(self, content: str) -> List[Dict[str, Any]]:
@@ -1912,6 +2350,10 @@ class QwenLLM(OpenAILLM):
 
     def _cleanup_old_user_message_images(self) -> None:
         """Remove images from old user messages."""
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("QwenLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
@@ -1931,6 +2373,91 @@ class QwenLLM(OpenAILLM):
                             logger.debug(f"Removed images from old user message at index {i}")
 
 
+class GLMLLM(OpenAILLM):
+    """Language model client for Zhipu AI GLM models (OpenAI-compatible)."""
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set GLM defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://open.bigmodel.cn/api/paas/v4/"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "glm-4-plus"
+
+        # Resolve API key from GLM-specific env vars before falling back to OpenAI logic
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            glm_key = os.getenv("ZHIPUAI_API_KEY") or os.getenv("GLM_API_KEY")
+            if glm_key:
+                llm_config["api_key"] = glm_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        self.is_vl_model = any(tag in self.model.lower() for tag in ["4.6v", "4.5v", "4v-", "-vl"])
+        logger.info(
+            f"GLMLLM initialized with model: {self.model} "
+            f"(is_vl: {self.is_vl_model}, cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
+
+
+class KimiLLM(OpenAILLM):
+    """Language model client for Moonshot AI Kimi models (OpenAI-compatible).
+
+    Supports both official API (kimi-k2-turbo-preview, etc.) and self-hosted Kimi-K2.5
+    via SGLang/vLLM with --reasoning-parser kimi_k2 (reasoning_content captured for visualization).
+    """
+
+    def __init__(self, llm_config: Dict[str, Any] | None = None, client_type: str = "shell", **kwargs):
+        if llm_config is None:
+            llm_config = {}
+
+        # Set Kimi defaults before parent init
+        if not llm_config.get("base_url") and not kwargs.get("base_url") and not os.getenv("OPENAI_BASE_URL"):
+            llm_config["base_url"] = "https://api.moonshot.ai/v1"
+
+        if not llm_config.get("model") and not kwargs.get("model"):
+            llm_config["model"] = "kimi-k2-turbo-preview"
+
+        # Resolve API key from Kimi-specific env vars
+        if not llm_config.get("api_key") and not kwargs.get("api_key") and not os.getenv("OPENAI_API_KEY"):
+            kimi_key = os.getenv("MOONSHOT_API_KEY") or os.getenv("KIMI_API_KEY")
+            if kimi_key:
+                llm_config["api_key"] = kimi_key
+
+        super().__init__(llm_config, client_type, **kwargs)
+
+        model_lower = self.model.lower()
+        self.is_multimodal = any(tag in model_lower for tag in ["k2.5", "k2-5"])
+        self.is_k2_5_model = "k2.5" in model_lower or "kimi-k2" in model_lower
+        logger.info(
+            f"KimiLLM initialized with model: {self.model} "
+            f"(is_multimodal: {self.is_multimodal}, is_k2.5: {self.is_k2_5_model}, "
+            f"cleanup_old_user_images: {self.cleanup_old_user_images})"
+        )
+
+    def build_prompt(self, task_description: str = None, feedback: str = None, conversation_history: list = None) -> str:
+        """Build Kimi prompt with explicit normalized coordinate instructions."""
+        prompt = super().build_prompt(
+            task_description=task_description,
+            feedback=feedback,
+            conversation_history=conversation_history,
+        )
+        return f"{prompt}\n\n{KIMI_RELATIVE_COORDINATE_INSTRUCTION}"
+
+    def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
+        """Capture reasoning_content for Kimi-K2.5 (SGLang/vLLM with --reasoning-parser kimi_k2)."""
+        if self.is_k2_5_model:
+            message = response.choices[0].message
+            reasoning_content = getattr(message, "reasoning_content", None)
+            result = super()._handle_api_response(response, attempt, max_attempts)
+            if reasoning_content:
+                self.last_think = reasoning_content
+            return result
+        return super()._handle_api_response(response, attempt, max_attempts)
+
+
 class ClaudeLLM(BaseLLM):
     """Language model client using Anthropic Claude API."""
 
@@ -1945,7 +2472,7 @@ class ClaudeLLM(BaseLLM):
             llm_config = {}
 
         # Extract model and api_key from llm_config, with fallback to kwargs and env variables
-        self.model = llm_config.get("model", kwargs.get("model", "claude-3-5-sonnet-20241022"))
+        self.model = llm_config.get("model", kwargs.get("model", "claude-sonnet-4-6"))
         api_key = (
             llm_config.get("api_key") or
             kwargs.get("api_key") or
@@ -1968,7 +2495,17 @@ class ClaudeLLM(BaseLLM):
             
         self.client = anthropic.Anthropic(**client_kwargs)
 
+        # Set cleanup_old_user_images=false in controller.args to keep all past
+        # user-turn images in history (higher token/cost; default true matches prior behavior).
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
         logger.info(f"ClaudeLLM initialized with model: {self.model}")
+        logger.info(
+            "ClaudeLLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         logger.debug(f"API key configured: {bool(api_key)}")
         logger.debug(f"Client type: {self.client_type}")
         logger.debug(f"Tool calling mode: {self.use_tools}")
@@ -1999,11 +2536,12 @@ class ClaudeLLM(BaseLLM):
             # Add images first (or text first? Claude documentation says text/image order doesn't matter much but usually alternating)
             # The user example has image first then text.
             for img_base64 in images_base64:
+                media_type = self._detect_image_media_type(img_base64)
                 message_content.append({
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png", # Assuming PNG for now
+                        "media_type": media_type,
                         "data": img_base64,
                     }
                 })
@@ -2021,38 +2559,58 @@ class ClaudeLLM(BaseLLM):
 
     def _make_api_call(self) -> Any:
         """Make Claude API call."""
-        # Prepare API call parameters
         api_params = {
             "model": self.model,
             "messages": self.messages,
-            "max_tokens": 4096, # Default max tokens
+            "max_tokens": 16000,
+            "cache_control": {"type": "ephemeral"},
         }
-        
-        # Add tools if in tool calling mode
+
         if self.use_tools and self.tools:
             api_params["tools"] = self._convert_openai_tools_to_claude(self.tools)
-        
+
+        if isinstance(self.model, str) and self.model.lower() in ["claude-opus-4-6", "claude-sonnet-4-6"]:
+            api_params["thinking"] = {"type": "adaptive"}
+            api_params["output_config"] = {"effort": "high"}
+
         return self.client.messages.create(**api_params)
     
     def _handle_api_response(self, response: Any, attempt: int, max_attempts: int) -> Dict[str, Any]:
         """Handle Claude API response."""
-        # Calculate cost
-        if hasattr(response, "usage"):
-            usage = response.usage
-            # Simplified cost calculation (placeholder)
-            # You might want to implement accurate pricing for Claude models
-            input_tokens = getattr(usage, "input_tokens", 0)
-            output_tokens = getattr(usage, "output_tokens", 0)
-            
-            # Approximate cost (using Claude 3.5 Sonnet pricing as reference: $3/1M input, $15/1M output)
-            cost = (input_tokens / 1_000_000) * 3.00 + (output_tokens / 1_000_000) * 15.00
-            
-            self.total_cost += cost
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            self.api_calls += 1
-            
-            logger.info(f"API call cost: ${cost:.6f} | Total cost: ${self.total_cost:.6f}")
+        if hasattr(response, "usage") and response.usage:
+            cost_info = CostTracker.track_anthropic(response.usage, self.model)
+            if cost_info:
+                cost = float(cost_info["total_cost_usd"])
+                tokens = cost_info["tokens"]
+                breakdown = cost_info["cost_breakdown_usd"]
+
+                self.total_cost += cost
+                self.total_input_tokens += (
+                    tokens["input_tokens"]
+                    + tokens["cache_write_input_tokens"]
+                    + tokens["cache_read_input_tokens"]
+                )
+                self.total_uncached_input_tokens += tokens["input_tokens"]
+                self.total_output_tokens += tokens["output_tokens"]
+
+                self.total_cache_write_input_tokens += tokens["cache_write_input_tokens"]
+                self.total_cache_read_input_tokens += tokens["cache_read_input_tokens"]
+                self.total_cached_tokens += tokens["cache_write_input_tokens"] + tokens["cache_read_input_tokens"]
+
+                self.total_cost_input_uncached_usd += float(breakdown["input_usd"])
+                self.total_cost_output_usd += float(breakdown["output_usd"])
+                self.total_cost_cache_write_usd += float(breakdown["cache_write_usd"])
+                self.total_cost_cache_read_usd += float(breakdown["cache_read_usd"])
+
+                self.api_calls += 1
+                self.per_call_costs.append(cost_info)
+
+                logger.info(
+                    f"API call #{self.api_calls} cost: ${cost:.6f} | "
+                    f"in={tokens['input_tokens']} cache_w={tokens['cache_write_input_tokens']} "
+                    f"cache_r={tokens['cache_read_input_tokens']} out={tokens['output_tokens']} | "
+                    f"Running total: ${self.total_cost:.6f}"
+                )
 
         # Extract content
         content_blocks = response.content
@@ -2184,18 +2742,67 @@ class ClaudeLLM(BaseLLM):
         return message
 
     def _cleanup_old_user_message_images(self) -> None:
-        """Remove images from old user messages."""
+        """Remove images from old user messages (except the latest user turn).
+
+        When ``cleanup_old_user_images`` is False, historical images are kept
+        in ``self.messages`` and sent on every API call.
+        """
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("ClaudeLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
             if self.messages[i].get("role") == "user":
                 last_user_msg_idx = i
                 break
-        
+
         if last_user_msg_idx is not None:
             for i in range(len(self.messages)):
                 if i != last_user_msg_idx and self.messages[i].get("role") == "user":
                     self.messages[i] = self._remove_images_from_message(self.messages[i])
+
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Get the message history in OpenAI-compatible format."""
+        history = []
+        for msg in self.messages:
+            new_msg = msg.copy()
+            content = msg.get("content")
+            
+            if isinstance(content, list):
+                # Handle list content (Claude format)
+                text_parts = []
+                tool_calls = []
+                has_only_tool_results = True
+                
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                            has_only_tool_results = False
+                        elif item.get("type") == "tool_use":
+                            # Convert tool_use to OpenAI tool_call
+                            tool_calls.append({
+                                "id": item.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": item.get("name"),
+                                    "arguments": json.dumps(item.get("input"))
+                                }
+                            })
+                            has_only_tool_results = False
+                
+                if has_only_tool_results:
+                    continue
+
+                new_msg["content"] = "".join(text_parts)
+                if tool_calls:
+                    new_msg["tool_calls"] = tool_calls
+            
+            history.append(new_msg)
+        return history
 
 
 class GeminiLLM(BaseLLM):
@@ -2231,7 +2838,18 @@ class GeminiLLM(BaseLLM):
         else:
             self.client = genai.Client(api_key=api_key)
 
+        self.cleanup_old_user_images: bool = bool(
+            llm_config.get("cleanup_old_user_images", kwargs.get("cleanup_old_user_images", False))
+        )
+
+        # Thinking configuration
+        self.thinking = llm_config.get("thinking", kwargs.get("thinking", False))
+
         logger.info(f"GeminiLLM initialized with model: {self.model}")
+        logger.info(
+            "GeminiLLM cleanup_old_user_images=%s (false keeps historical images)",
+            self.cleanup_old_user_images,
+        )
         logger.debug(f"API key configured: {bool(api_key)}")
         logger.debug(f"Client type: {self.client_type}")
         logger.debug(f"Tool calling mode: {self.use_tools}")
@@ -2406,13 +3024,22 @@ class GeminiLLM(BaseLLM):
             "contents": contents
         }
         
+        # Build GenerateContentConfig
+        config_kwargs = {}
+
         # Add tools if in tool calling mode
         if self.use_tools and self.tools:
             gemini_tools = self._convert_openai_tools_to_gemini(self.tools)
             if gemini_tools:
-                config = types.GenerateContentConfig(tools=gemini_tools)
-                api_params["config"] = config
-        
+                config_kwargs["tools"] = gemini_tools
+
+        # Add thinking config if enabled
+        if self.thinking:
+            config_kwargs["thinking_config"] = types.ThinkingConfig()
+
+        if config_kwargs:
+            api_params["config"] = types.GenerateContentConfig(**config_kwargs)
+
         response = self.client.models.generate_content(**api_params)
         self.api_calls += 1
         return response
@@ -2426,12 +3053,40 @@ class GeminiLLM(BaseLLM):
         candidate = response.candidates[0]
         if not candidate.content or not candidate.content.parts:
             raise ValueError("No content parts in Gemini response")
+
+        cost_info = CostTracker.track_gemini(response, self.model)
+        if cost_info:
+            cost = float(cost_info["total_cost_usd"])
+            tokens = cost_info["tokens"]
+            breakdown = cost_info["cost_breakdown_usd"]
+
+            self.total_cost += cost
+            self.total_input_tokens += tokens["prompt_token_count"]
+            self.total_uncached_input_tokens += tokens["uncached_input_tokens"]
+            self.total_output_tokens += tokens["candidates_token_count"]
+            self.total_cached_tokens += tokens["cached_content_token_count"]
+
+            self.total_cost_input_uncached_usd += float(breakdown["input_uncached_usd"])
+            self.total_cost_input_cached_usd += float(breakdown["input_cached_usd"])
+            self.total_cost_output_usd += float(breakdown["output_usd"])
+
+            self.per_call_costs.append(cost_info)
+            logger.info(
+                f"API call #{self.api_calls} cost: ${cost:.6f} ({cost_info.get('pricing_tier','')}) | "
+                f"in={tokens['prompt_token_count']} cached={tokens['cached_content_token_count']} "
+                f"out={tokens['candidates_token_count']} | Running total: ${self.total_cost:.6f}"
+            )
         
         # Check for function calls
         function_calls = []
         text_content = ""
-        
+        think_content = ""
+
         for part in candidate.content.parts:
+            # Capture thinking parts separately
+            if hasattr(part, 'thought') and part.thought and hasattr(part, 'text') and part.text:
+                think_content += part.text
+                continue
             if hasattr(part, 'function_call') and part.function_call:
                 # Extract function call name and args
                 func_call = part.function_call
@@ -2457,7 +3112,7 @@ class GeminiLLM(BaseLLM):
                 text_content += part.text
         
         # Save think content for visualization
-        self.last_think = text_content if text_content else None
+        self.last_think = think_content if think_content else (text_content if text_content else None)
         
         # Handle tool calling response
         if function_calls:
@@ -2564,41 +3219,6 @@ class GeminiLLM(BaseLLM):
         """Clear the message history."""
         logger.debug(f"Clearing message history ({len(self.messages)} messages removed)")
         self.messages = []
-        # Note: Cost tracking is NOT reset on clear_history to maintain cumulative cost
-
-    def get_cost_stats(self) -> Dict[str, Any]:
-        """Get API cost and usage statistics.
-        
-        Returns:
-            Dictionary with cost and token usage information
-        """
-        return {
-            "total_cost_usd": round(self.total_cost, 6),
-            "total_input_tokens": self.total_input_tokens,
-            "total_output_tokens": self.total_output_tokens,
-            "total_cached_tokens": self.total_cached_tokens,
-            "total_tokens": self.total_input_tokens + self.total_output_tokens,
-            "api_calls": self.api_calls,
-            "model": self.model
-        }
-    
-    def reset_cost_tracking(self) -> None:
-        """Reset cost tracking statistics."""
-        logger.debug("Resetting cost tracking")
-        self.total_cost = 0.0
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cached_tokens = 0
-        self.api_calls = 0
-        self.last_think = None
-    
-    def get_last_think(self) -> str | None:
-        """Get the last think/reasoning content for visualization.
-        
-        Returns:
-            The last think content string, or None if not available
-        """
-        return self.last_think
 
     def add_tool_message(self, tool_call_id: str, content: str) -> None:
         """Append tool call results to the conversation history for Gemini tool-calling compliance."""
@@ -2648,6 +3268,10 @@ class GeminiLLM(BaseLLM):
         This prevents image accumulation across iterations. Only the current iteration's images
         should be included in the API call.
         """
+        if not getattr(self, "cleanup_old_user_images", True):
+            logger.debug("GeminiLLM: keeping images in all user messages (cleanup disabled)")
+            return
+
         # Find the last user message (should be the one we just added)
         last_user_msg_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
@@ -2668,6 +3292,10 @@ class GeminiLLM(BaseLLM):
                             # Remove images, keep only text
                             self.messages[i] = self._remove_images_from_message(self.messages[i])
                             logger.debug(f"Removed images from old user message at index {i}")
+
+
+class DeepSeekLLM(BaseLLM):
+    pass
 
 
 class Human(Controller):

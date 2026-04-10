@@ -46,10 +46,12 @@ outputs/*
 outputs-*/*
 trash/*
 configs/generated/*
-
 tasks/*
-
 configs/*
+analysis_results/*
+teleport/
+scripts/*
+
 # dataset files
 cocoa-bench-v0.1/
 *.zip
@@ -59,3 +61,9 @@ cocoabench-head/plotdigitizer-data-extraction/generated_plotdigitizer_tasks/
 
 # Exclude local working task
 cocoabench-head/yearly-costco-receipts
+results/
+configs/
+.parallel_run/
+
+# uv
+uv.lock

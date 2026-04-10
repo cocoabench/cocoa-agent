@@ -15,7 +15,7 @@ from google import genai
 
 from .base import BaseAgent
 from executor.utils import get_logger
-from decrypt_utils import decrypt_file_to_memory, read_canary
+from decrypt import decrypt_file_to_memory, read_canary
 
 
 logger = get_logger("gemini_deep_research_agent")

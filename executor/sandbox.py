@@ -5,9 +5,13 @@ Helper functions for executor operations.
 import time
 import subprocess
 import json
+import os
+import io
+import base64
 from typing import Any, Dict, Optional
 from pathlib import Path
 import requests
+from PIL import Image
 from .utils import retry_request, validate_response, get_logger, colorize
 
 from agent_sandbox import Sandbox
@@ -16,6 +20,7 @@ from agent_sandbox.browser import (
     Action_MoveTo, Action_MoveRel, Action_Wait, Action_DoubleClick, Action_RightClick,
     Action_DragTo, Action_DragRel, Action_Hotkey, Action_KeyDown, Action_KeyUp
 )
+from agent_sandbox.types.resolution import Resolution
 
 logger = get_logger("sandbox")
 
@@ -35,6 +40,75 @@ class SandboxClient:
         self.container_id: Optional[str] = None
         self.task_name: Optional[str] = None
         self.task_dir: Optional[str] = None
+        self.llm_provider = sandbox_config.get("llm_provider") or os.getenv("COCOA_LLM_PROVIDER")
+        self.llm_model = sandbox_config.get("llm_model") or os.getenv("COCOA_LLM_MODEL")
+        self.browser_resolution = sandbox_config.get("browser_resolution")
+
+    def _configure_browser_resolution(self) -> None:
+        """Apply optional browser viewport configuration."""
+        if self.sdk_client is None or not self.browser_resolution:
+            return
+
+        width = self.browser_resolution.get("width")
+        height = self.browser_resolution.get("height")
+        if not isinstance(width, int) or not isinstance(height, int):
+            logger.warning(f"Ignoring invalid browser_resolution config: {self.browser_resolution}")
+            return
+
+        try:
+            self.sdk_client.browser.set_config(resolution=Resolution(width=width, height=height))
+            logger.info(f"Configured browser resolution to {width}x{height}")
+        except Exception as e:
+            logger.warning(f"Failed to configure browser resolution {width}x{height}: {e}")
+
+    def _should_compress_for_claude(self) -> bool:
+        provider = (getattr(self, "llm_provider", None) or "").lower()
+        model = (getattr(self, "llm_model", None) or "").lower()
+        return provider == "claude" or "claude" in model
+
+    def _is_kimi_model(self) -> bool:
+        """Return True when the current sandbox is serving a Kimi controller."""
+        provider = (getattr(self, "llm_provider", None) or "").strip().lower()
+        model = (getattr(self, "llm_model", None) or "").strip().lower()
+        return provider == "kimi" or "kimi" in model or "moonshot" in model
+
+    def _is_qwen3_model(self) -> bool:
+        """Return True when the current sandbox is serving a Qwen3-family controller."""
+        provider = (getattr(self, "llm_provider", None) or "").strip().lower()
+        model = (getattr(self, "llm_model", None) or "").strip().lower()
+        return "qwen3" in model or (provider == "qwen" and "qwen" in model)
+
+    def _compress_image_bytes_for_claude(self, image_bytes: bytes, max_base64_bytes: int = 5 * 1024 * 1024) -> bytes:
+        if not self._should_compress_for_claude():
+            return image_bytes
+        if len(base64.b64encode(image_bytes)) <= max_base64_bytes:
+            return image_bytes
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+        except Exception as e:
+            raise ValueError(f"Cannot open image for compression and it exceeds size limit: {e}") from e
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        width, height = img.size
+        max_dim = 1568
+        scale = min(1.0, max_dim / max(width, height)) if max(width, height) > max_dim else 1.0
+        quality = 85
+        data = image_bytes
+        for _ in range(32):
+            new_w = max(1, int(width * scale))
+            new_h = max(1, int(height * scale))
+            resized = img.resize((new_w, new_h)) if (new_w, new_h) != img.size else img
+            buffer = io.BytesIO()
+            resized.save(buffer, format="JPEG", quality=quality, optimize=True)
+            data = buffer.getvalue()
+            if len(base64.b64encode(data)) <= max_base64_bytes:
+                return data
+            scale *= 0.85
+            quality = max(40, quality - 10)
+        raise ValueError(
+            f"Image compression failed after 32 iterations: "
+            f"base64 size {len(base64.b64encode(data))} > limit {max_base64_bytes}"
+        )
 
     def health_check(self) -> bool:
         """Check if the agent server is running."""
@@ -223,13 +297,19 @@ class SandboxClient:
         try:
             if self.task_dir and self.task_name:
                 docker_compose_path = f"{self.task_dir}/docker-compose.yaml"
+                env = {
+                    "TASK_DOCKER_IMAGE_NAME": f"task-{self.task_name}:latest",
+                    "TASK_DOCKER_CONTAINER_NAME": f"task-{self.task_name}-container",
+                    "HOST_PORT": str(self.port)
+                }
                 logger.info(f"Stopping container for task '{self.task_name}' using docker-compose")
 
                 result = subprocess.run(
                     ["docker", "compose", "-f", docker_compose_path, "down"],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=30,
+                    env={**subprocess.os.environ, **env}
                 )
 
                 if result.returncode == 0:
@@ -257,12 +337,84 @@ class BrowserSandboxClient(SandboxClient):
         # Track all actions and their feedbacks
         self.execution_history: list[Dict[str, Any]] = []
         self.sdk_client: Optional[Sandbox] = None
+        self._cached_browser_viewport: Optional[tuple[int, int]] = None
 
     def _initialize_sdk_client(self) -> None:
         """Initialize the AIO Sandbox SDK client."""
         if self.sdk_client is None:
             self.sdk_client = Sandbox(base_url=self.base_url)
             logger.debug(f"Initialized Sandbox SDK client with base_url: {self.base_url}")
+            self._configure_browser_resolution()
+
+    def _get_browser_viewport_size(self) -> Optional[tuple[int, int]]:
+        """Resolve the active browser viewport size for coordinate projection."""
+        if self._cached_browser_viewport is not None:
+            return self._cached_browser_viewport
+
+        width = self.browser_resolution.get("width") if isinstance(self.browser_resolution, dict) else None
+        height = self.browser_resolution.get("height") if isinstance(self.browser_resolution, dict) else None
+        if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+            self._cached_browser_viewport = (width, height)
+            return self._cached_browser_viewport
+
+        try:
+            info = self.sdk_client.browser.get_info()
+            browser_data = info.data
+            viewport_width = int(browser_data.viewport.width)
+            viewport_height = int(browser_data.viewport.height)
+            if viewport_width > 0 and viewport_height > 0:
+                self._cached_browser_viewport = (viewport_width, viewport_height)
+                return self._cached_browser_viewport
+        except Exception as e:
+            logger.warning(f"Failed to read browser viewport for coordinate projection: {e}")
+
+        return None
+
+    def _maybe_project_relative_coordinates(self, action_type: str, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert model-specific relative screen coordinates into absolute viewport pixels."""
+        if self._is_kimi_model():
+            model_name = "Kimi"
+            coordinate_base = 1.0
+        elif self._is_qwen3_model():
+            model_name = "Qwen3"
+            coordinate_base = 1000.0
+        else:
+            return action_data
+
+        if action_type not in {"browser_click", "browser_move_to", "browser_drag_to"}:
+            return action_data
+
+        x = action_data.get("x")
+        y = action_data.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return action_data
+
+        x_value = float(x)
+        y_value = float(y)
+        if not (0.0 <= x_value <= coordinate_base and 0.0 <= y_value <= coordinate_base):
+            return action_data
+
+        viewport = self._get_browser_viewport_size()
+        if viewport is None:
+            return action_data
+
+        width, height = viewport
+        projected_x = int(round((x_value / coordinate_base) * width))
+        projected_y = int(round((y_value / coordinate_base) * height))
+
+        projected_action = dict(action_data)
+        projected_action["x"] = projected_x
+        projected_action["y"] = projected_y
+
+        logger.info(
+            f"Projected {model_name} relative coordinates for {action_type}: "
+            f"({x_value}, {y_value}) -> ({projected_x}, {projected_y}) using viewport {width}x{height}"
+        )
+        print(
+            f"Projected {model_name} relative coordinates for {action_type}: "
+            f"({x_value}, {y_value}) -> ({projected_x}, {projected_y}) using viewport {width}x{height}"
+        )
+        return projected_action
 
     def _construct_browser_action(self, action_data: Dict[str, Any]):
         """Construct a browser action object from action data.
@@ -274,6 +426,7 @@ class BrowserSandboxClient(SandboxClient):
             Browser action object
         """
         action_type = action_data.get("action_type")
+        action_data = self._maybe_project_relative_coordinates(action_type, action_data)
         
         if action_type == "browser_click":
             return Action_Click(
@@ -345,8 +498,7 @@ class BrowserSandboxClient(SandboxClient):
             screenshot_data = b""
             for chunk in self.sdk_client.browser.screenshot():
                 screenshot_data += chunk
-            
-            # Encode to base64
+            screenshot_data = self._compress_image_bytes_for_claude(screenshot_data)
             base64_image = base64.b64encode(screenshot_data).decode('utf-8')
             status_message = f"Screenshot taken successfully ({len(screenshot_data)} bytes)"
             return base64_image, status_message
@@ -1651,6 +1803,7 @@ class UnifiedSandboxClient(SandboxClient):
         if self.sdk_client is None:
             self.sdk_client = Sandbox(base_url=self.base_url)
             logger.debug(f"Initialized Sandbox SDK client with base_url: {self.base_url}")
+            self._configure_browser_resolution()
             
             # Create shell session
             try:
@@ -1761,8 +1914,13 @@ class UnifiedSandboxClient(SandboxClient):
         """Handle browser-specific actions."""
         # Reuse BrowserSandboxClient logic
         browser_client = BrowserSandboxClient.__new__(BrowserSandboxClient)
+        browser_client.base_url = self.base_url
+        browser_client.llm_provider = self.llm_provider
+        browser_client.llm_model = self.llm_model
+        browser_client.browser_resolution = self.browser_resolution
         browser_client.sdk_client = self.sdk_client
         browser_client.execution_history = []
+        browser_client._cached_browser_viewport = None
         feedback = browser_client.get_feedback(action)
         
         # Merge history
@@ -1890,7 +2048,6 @@ class UnifiedSandboxClient(SandboxClient):
                 if not file_path:
                     raise ValueError("image_read requires 'path' or 'file' parameter")
                 
-                # Download the image file as binary data
                 image_data = b""
                 for chunk in self.sdk_client.file.download_file(path=file_path):
                     image_data += chunk
@@ -1898,7 +2055,7 @@ class UnifiedSandboxClient(SandboxClient):
                 if not image_data:
                     raise ValueError(f"Failed to read image file: {file_path} or file is empty")
                 
-                # Encode to base64
+                image_data = self._compress_image_bytes_for_claude(image_data)
                 base64_image = base64.b64encode(image_data).decode('utf-8')
                 message = f"Successfully read image from {file_path} ({len(image_data)} bytes)"
                 

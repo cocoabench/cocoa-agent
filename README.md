@@ -119,6 +119,35 @@ For batch evaluation on the encrypted `cocoabench-v0.2` tasks, use:
 This batch runner decrypts each task into its output directory, runs the same agent-based evaluation path, and maintains top-level `manifest.json` and `summary.json` files for resume and aggregation.
 
 Detailed script usage is documented in `scripts/README-openclaw.md`.
+### Parallel Inference
+
+To run tasks in parallel across multiple workers (each with its own Docker sandbox port):
+
+```bash
+python parallel_inference.py \
+  --config <config_path> \
+  --tasks-dir cocoabench-v0.4/ \
+  --output-dir <results_dir> \
+  --workers 8
+```
+
+| Arg | Required | Description |
+|-----|----------|-------------|
+| `--config` | Yes | Model config file path (JSON) |
+| `--tasks-dir` | Yes | Directory containing task subdirectories |
+| `--output-dir` | Yes | Final output directory for result JSONs |
+| `--workers` | No | Number of parallel workers (default: 4) |
+| `--base-port` | No | Starting Docker sandbox port (default: 8084), auto-scans for available ports |
+| `--model` | No | Override model name from config |
+| `--run-all` | No | Run all tasks including previously passed ones. Default: skip passed, rerun failed/missing only |
+| `--work-dir` | No | Temp directory for worker configs/logs (default: `.parallel_run`) |
+
+By default, tasks that already have a successful result in `--output-dir` are skipped, so you can rerun the same command to retry only failed/missing tasks. Use `--run-all` to force rerun everything.
+
+**Output:**
+- `output-dir/{task_name}.json` — result file per task
+- `output-dir/statistics.txt` — pass rate, failure list, and API cost summary
+- `work-dir/` — per-session logs and intermediate files for debugging
 
 ## Configuration
 
