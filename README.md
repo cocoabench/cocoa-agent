@@ -191,12 +191,10 @@ We welcome new benchmark tasks! See [contrib/CONTRIBUTING.md](contrib/CONTRIBUTI
 ## Citation
 
 ```bibtex
-@misc{cocoabench2025,
-  title={CocoaBench: An Evaluation Framework for General Agents with Compositional Cognitive Abilities},
-  author={Shibo Hao and Zhining Zhang and Zhiqi Liang and Tianyang Liu and Zilong Wang and others},
-  howpublished={Blog post},
-  month={December},
-  year={2025},
-  url={https://cocoabench.github.io/}
+@article{team2026cocoabench,
+  title={CocoaBench: Evaluating Unified Digital Agents in the Wild},
+  author={Team, CocoaBench and Hao, Shibo and Zhang, Zhining and Liang, Zhiqi and Liu, Tianyang and Zha, Yuheng and Gao, Qiyue and Chen, Jixuan and Wang, Zilong and Cheng, Zhoujun and others},
+  journal={arXiv preprint arXiv:2604.11201},
+  year={2026}
 }
 ```
